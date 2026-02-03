@@ -36,7 +36,7 @@ print("\n🚀 Démarrage de l'entraînement TabPFN...")
 
 try:
     # CPU ou GPU si dispo
-    regressor = TabPFNRegressor(device='cpu', ignore_pretraining_limits=True)
+    regressor = TabPFNRegressor(device='cuda', ignore_pretraining_limits=True)
     
     regressor.fit(X_train_s, y_train_s)
     print("✅ Entraînement TabPFN terminé avec succès.")
