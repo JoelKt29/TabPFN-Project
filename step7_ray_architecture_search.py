@@ -1,7 +1,4 @@
 """
-Ray Tune Architecture Search for TabPFN
-Selon Peter: "I would just kick off the architecture as a search with ray"
-             "Use only differentiable activation functions"
 
 Tests automatiques:
 - Swish, Mish, GELU, SELU (toutes différentiables)
@@ -20,37 +17,27 @@ from torch.utils.data import DataLoader, TensorDataset
 import json
 from pathlib import Path
 import ray
-
-try:
-    from ray import tune, train
-    from ray.tune.schedulers import ASHAScheduler
-    from ray.tune.search.optuna import OptunaSearch
-    RAY_AVAILABLE = True
-except ImportError:
-    RAY_AVAILABLE = False
-    print("⚠️ Ray Tune not installed. Install with: pip install 'ray[tune]' optuna")
-
+from ray import tune, train
+from ray.tune.schedulers import ASHAScheduler
+from ray.tune.search.optuna import OptunaSearch
 from step6_loss_with_derivatives import create_loss_function
 
 
 # ============================================================================
-# ACTIVATION FUNCTIONS (All Differentiable as Peter requested)
+# DIFFERENTIABLE ACTIVATION FUNCTIONS 
 # ============================================================================
 
 class Swish(nn.Module):
-    """f(x) = x * sigmoid(x) - Smooth, differentiable everywhere"""
     def forward(self, x):
         return x * torch.sigmoid(x)
 
 
 class Mish(nn.Module):
-    """f(x) = x * tanh(softplus(x)) - Smooth, self-regularizing"""
     def forward(self, x):
         return x * torch.tanh(nn.functional.softplus(x))
 
 
 def get_activation(name: str) -> nn.Module:
-    """Get activation by name - only differentiable ones"""
     activations = {
         'swish': Swish(),
         'mish': Mish(),
@@ -196,7 +183,7 @@ def train_model_ray(config: dict):
     """
     
     # Set device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
     
     # Load data (assumes data is already prepared)
     # In practice, you'd load from the scaled CSV files
@@ -365,7 +352,7 @@ def run_ray_tune_search(
     data_path: str = 'sabr_with_derivatives_scaled.csv',
     num_samples: int = 50,
     max_epochs: int = 50,
-    gpus_per_trial: float = 0.25,
+    gpus_per_trial: float = 0.0,
     output_dir: str = './ray_results'
 ):
     """
@@ -454,7 +441,7 @@ def run_ray_tune_search(
     tuner = tune.Tuner(
         tune.with_resources(
             train_model_ray,
-            resources={"cpu": 2, "gpu": 1}
+            resources={"cpu": 4, "gpu": 0}
         ),
         tune_config=tune.TuneConfig(
             scheduler=scheduler,

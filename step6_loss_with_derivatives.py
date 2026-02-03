@@ -1,13 +1,3 @@
-"""
-Loss Function with Derivatives
-Selon Peter: "modify loss function, create the data"
-
-Loss = α * L_volatility + β * L_derivatives
-
-Permet de forcer le modèle à apprendre non seulement les valeurs
-mais aussi les gradients (forme de la surface)
-"""
-
 import torch
 import torch.nn as nn
 import numpy as np
@@ -15,12 +5,7 @@ from typing import Dict, Optional, Tuple
 
 
 class DerivativeLoss(nn.Module):
-    """
-    Combined loss for volatility + derivatives
-    
-    Loss = value_weight * MAE(vol) + deriv_weight * MAE(derivatives)
-    """
-    
+        
     def __init__(
         self,
         value_weight: float = 1.0,
@@ -292,9 +277,6 @@ class GradientMatchingLoss(nn.Module):
         return total_loss, loss_breakdown
 
 
-# ============================================================================
-# Helper functions
-# ============================================================================
 
 def create_loss_function(loss_type: str = 'derivative', **kwargs) -> nn.Module:
     """
@@ -322,11 +304,8 @@ def create_loss_function(loss_type: str = 'derivative', **kwargs) -> nn.Module:
 
 
 if __name__ == "__main__":
-    print("="*80)
-    print("LOSS FUNCTIONS WITH DERIVATIVES - Testing")
-    print("="*80)
+   
     
-    # Create dummy data
     batch_size = 32
     
     pred_vol = torch.randn(batch_size, 1) * 0.01 + 0.01
@@ -366,11 +345,4 @@ if __name__ == "__main__":
     loss, breakdown = loss_fn(pred_vol, true_vol, pred_derivs, true_derivs)
     print(f"   Total loss: {loss.item():.6f}")
     
-    print("\n" + "="*80)
-    print("✅ All loss functions working correctly!")
-    print("="*80)
-    print("\nRecommendations:")
-    print("- Start with DerivativeLoss (simple, effective)")
-    print("- Use AdaptiveDerivativeLoss if some derivatives are harder to learn")
-    print("- Use HuberDerivativeLoss if you have outliers in data")
-    print("- Use GradientMatchingLoss for most principled approach (but slower)")
+   
