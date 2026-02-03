@@ -1,0 +1,350 @@
+# ============================================================================
+# .gitignore pour Projet TabPFN SABR
+# ============================================================================
+
+# ────────────────────────────────────────────────────────────────────────────
+# DONNÉES (Ne jamais commit les données - trop grosses et générées localement)
+# ────────────────────────────────────────────────────────────────────────────
+
+# Fichiers CSV (données)
+*.csv
+!example_data.csv  # Garder un petit exemple si nécessaire
+
+# Fichiers Excel
+*.xlsx
+*.xls
+
+# Fichiers pickle/numpy
+*.pkl
+*.pickle
+*.npy
+*.npz
+
+# Fichiers HDF5
+*.h5
+*.hdf5
+
+# JSON de données (mais garder les configs)
+*_data*.json
+*_params*.json
+scaling_params*.json
+!config*.json  # Garder les fichiers de configuration
+!best_config.json  # Garder la meilleure config trouvée
+
+# ────────────────────────────────────────────────────────────────────────────
+# MODÈLES ENTRAÎNÉS (Trop gros pour Git)
+# ────────────────────────────────────────────────────────────────────────────
+
+# PyTorch models
+*.pt
+*.pth
+*.ckpt
+*.checkpoint
+
+# TensorFlow models
+*.pb
+saved_model/
+
+# Dossiers de checkpoints
+checkpoints/
+models/
+model_checkpoints/
+saved_models/
+
+# ────────────────────────────────────────────────────────────────────────────
+# RÉSULTATS & OUTPUTS (Générés localement)
+# ────────────────────────────────────────────────────────────────────────────
+
+# Résultats d'expériences
+results/
+outputs/
+experiments/
+runs/
+
+# Ray Tune results
+ray_results/
+~/ray_results/
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# Tensorboard
+tensorboard_logs/
+logs/
+*.tfevents.*
+
+# Graphiques et images
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.svg
+!architecture_diagram.png  # Garder les diagrammes d'architecture si nécessaire
+
+# Rapports générés
+*_report.md
+*_results.csv
+*_statistics.txt
+!README*.md  # Garder les README
+
+# ────────────────────────────────────────────────────────────────────────────
+# PYTHON
+# ────────────────────────────────────────────────────────────────────────────
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# PEP 582
+__pypackages__/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath
+*.sage.py
+
+# Environments
+.env
+.env.local
+.env.*.local
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder
+.spyderproject
+.spyproject
+
+# Rope
+.ropeproject
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre
+.pyre/
+
+# ────────────────────────────────────────────────────────────────────────────
+# IDEs & EDITORS
+# ────────────────────────────────────────────────────────────────────────────
+
+# VSCode
+.vscode/
+*.code-workspace
+.history/
+
+# PyCharm / IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+.idea_modules/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+.vim/
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# ────────────────────────────────────────────────────────────────────────────
+# OS
+# ────────────────────────────────────────────────────────────────────────────
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+.directory
+.Trash-*
+.nfs*
+
+# ────────────────────────────────────────────────────────────────────────────
+# TEMPORARY & MISC
+# ────────────────────────────────────────────────────────────────────────────
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+
+# Logs
+*.log
+logs/
+*.out
+
+# Archives
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+
+# ────────────────────────────────────────────────────────────────────────────
+# PROJET SPÉCIFIQUE
+# ────────────────────────────────────────────────────────────────────────────
+
+# Données SABR générées
+sabr_data*.csv
+sabr_complete*.csv
+sabr_with_derivatives*.csv
+sabr_*_raw.csv
+sabr_*_scaled.csv
+
+# Anciens fichiers
+OLD/
+archive/
+deprecated/
+
+# Fichiers de test temporaires
+test_*.py
+debug_*.py
+scratch_*.py
+
+# ────────────────────────────────────────────────────────────────────────────
+# GARDER CES FICHIERS (Exceptions)
+# ────────────────────────────────────────────────────────────────────────────
+
+# Documentation
+!README.md
+!README*.md
+!GUIDE*.md
+!LICENSE
+!CONTRIBUTING.md
+!CHANGELOG.md
+
+# Configs importantes
+!requirements.txt
+!setup.py
+!setup.cfg
+!pyproject.toml
+!environment.yml
+
+# Exemple de données (petit)
+!data/example/
+!example_data_small.csv
+
+# Scripts essentiels
+!scripts/
+!*.sh
+
+# Tests
+!tests/
+!test_*.py  # Annule l'exclusion si dans dossier tests/
+
+# Documentation images (seulement dans docs/)
+!docs/**/*.png
+!docs/**/*.jpg
+!docs/**/*.svg
