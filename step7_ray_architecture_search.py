@@ -450,20 +450,21 @@ def run_ray_tune_search(
     abs_output_dir = os.path.abspath(output_dir)
     # Run tuning
     tuner = tune.Tuner(
-        tune.with_resources(
-            train_model_ray,
-            resources={"cpu": 1, "gpu": gpus_per_trial}
-        ),
-        tune_config=tune.TuneConfig(
-            scheduler=scheduler,
-            search_alg=search_alg,
-            num_samples=num_samples,
-        ),
-        param_space=search_space,
-        run_config=train.RunConfig(
-            name="sabr_tabpfn_search",
-            storage_path=abs_output_dir, # <-- Utilise la variable abs_output_dir ici
-        )
+    tune.with_resources(
+        train_model_ray,
+        resources={"cpu": 1, "gpu": gpus_per_trial}
+    ),
+    tune_config=tune.TuneConfig(
+        scheduler=scheduler,
+        search_alg=search_alg,
+        num_samples=num_samples,
+    ),
+    param_space=search_space,
+    run_config=train.RunConfig(
+        name="sabr_tabpfn_search",
+        storage_path=os.path.abspath(output_dir), # Assure-toi d'avoir le chemin absolu !
+        verbose=1,  # <--- AJOUTE OU MODIFIE CETTE LIGNE ICI
+    )
     )
     
     results = tuner.fit()
