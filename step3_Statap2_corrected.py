@@ -46,8 +46,7 @@ for beta in tqdm(BETAS, desc="Génération SABR"):
                         )
                         alpha = sabr.alpha()
 
-                        # 8 Strikes - CORRECTION : Peter dit .75 to 1.5 of forward
-                        strikes = np.linspace(0.75 * f, 1.5 * f, NUM_STRIKES)  # ✅ CORRIGÉ
+                        strikes = np.linspace(0.75 * f, 1.5 * f, NUM_STRIKES)  
 
                         for k in strikes:
                             if count >= MAX_SAMPLES:

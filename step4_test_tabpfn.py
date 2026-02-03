@@ -14,9 +14,9 @@ try:
     df = pd.read_csv(DATA_FILE)
     with open(SCALING_PARAMS_FILE, 'r') as f:
         scaling_params = json.load(f)
-    print(f"✅ Données chargées : {len(df)} échantillons.")
+    print(f" Données chargées : {len(df)} échantillons.")
 except FileNotFoundError:
-    print("❌ ERREUR : Fichier de données ou de scaling introuvable.")
+    print(" ERREUR : Fichier de données ou de scaling introuvable.")
     exit()
 
 # Extraction des features (X) et de la cible (y)
@@ -33,14 +33,13 @@ y_min = scaling_params['y_min']
 y_max = scaling_params['y_max']
 
 # --- 4. TABPFN REGRESSION ---
-print("\n🚀 Démarrage de l'entraînement TabPFN...")
+print("\n Démarrage de l'entraînement TabPFN...")
 
 try:
-    # CPU ou GPU si dispo
     regressor = TabPFNRegressor(device='cuda', ignore_pretraining_limits=True)
     
     regressor.fit(X_train_s, y_train_s)
-    print("✅ Entraînement TabPFN terminé avec succès.")
+    print(" Entraînement TabPFN terminé avec succès.")
 
     # Prédiction sur le jeu de test
     predictions_s = regressor.predict(X_test_s)
@@ -51,11 +50,8 @@ try:
 
     # --- 6. CALCUL DES MÉTRIQUES ---
     mae_real = mean_absolute_error(y_test_real, predictions_real)
-    mape_real = mean_absolute_percentage_error(y_test_real, predictions_real)
 
-    print("\n===============================")
-    print(f"📊 MAE  : {mae_real:.6f} (Target = 0.0001)")
-    print("===============================")
+    print(f" MAE  : {mae_real:.6f} (Target = 0.0001)")
 
     comp_df = pd.DataFrame({
         'SABR ': y_test_real[:5],
@@ -65,5 +61,4 @@ try:
     print(comp_df)
 
 except Exception as e:
-    print("\n❌ ERREUR D'EXÉCUTION TabPFN ---")
     print(f"Détail : {e}")
