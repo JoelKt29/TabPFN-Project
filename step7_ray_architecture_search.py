@@ -19,6 +19,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 import json
 from pathlib import Path
+import ray
 
 try:
     from ray import tune, train
@@ -448,6 +449,8 @@ def run_ray_tune_search(
 
     abs_output_dir = os.path.abspath(output_dir)
     # Run tuning
+    ray.init(ignore_reinit_error=True)
+
     tuner = tune.Tuner(
         tune.with_resources(
             train_model_ray,
@@ -459,10 +462,7 @@ def run_ray_tune_search(
             num_samples=num_samples,
         ),
         param_space=search_space,
-        run_config=train.RunConfig(
-            name="sabr_tabpfn_search",
-            storage_path=abs_output_dir,
-        ))
+        )
     
     results = tuner.fit()
     
