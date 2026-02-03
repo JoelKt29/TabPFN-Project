@@ -459,11 +459,9 @@ def run_ray_tune_search(
         num_samples=num_samples,
     ),
     param_space=search_space,
-    run_config=train.RunConfig(
-        name="sabr_tabpfn_search",
-        storage_path=os.path.abspath(output_dir), # Assure-toi d'avoir le chemin absolu !
-        verbose=1,  # <--- AJOUTE OU MODIFIE CETTE LIGNE ICI
-    )
+    un_config=train.RunConfig(
+    name="sabr_tabpfn_search",
+    storage_path=os.path.abspath(output_dir),)
     )
     
     results = tuner.fit()
@@ -503,7 +501,7 @@ if __name__ == "__main__":
                         help='Number of configurations to try')
     parser.add_argument('--epochs', type=int, default=50,
                         help='Max epochs per trial')
-    parser.add_argument('--gpus', type=float, default=0.25,
+    parser.add_argument('--gpus', type=float, default=1,
                         help='GPU fraction per trial (0 for CPU only)')
     parser.add_argument('--output', type=str, default='./ray_results',
                         help='Output directory')
