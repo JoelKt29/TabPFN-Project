@@ -1,909 +1,567 @@
-# 🎯 Guide Complet : Étudier et Modifier TabPFN pour la Finance
+# 🎯 PROJET TABPFN SABR - README COMPLET ET CLAIR
 
-## 📋 Votre Vrai Objectif
+## 📌 BUT DU PROJET (En Simple)
 
-**CE QUE VOUS VOULEZ :**
-```
-1. Comprendre comment TabPFN fonctionne (code source)
-2. Modifier TabPFN (activations, architecture)
-3. Fine-tuner TabPFN sur données financières
-4. SABR = un exemple parmi d'autres datasets financiers
-```
+**Objectif Principal :** Améliorer TabPFN pour qu'il prédise mieux les volatilités SABR ET leurs dérivées (Greeks).
 
-**CE GUIDE VA VOUS APPRENDRE :**
+**Problème Identifié par Peter :**
+> "TabPFN is quite good for the values, it struggles with the derivatives"
+
+**Solution :**
+1. Calculer les dérivées des volatilités SABR
+2. Entraîner des modèles qui prédisent SIMULTANÉMENT volatilités + dérivées
+3. Tester différentes activations pour trouver la meilleure
+4. Comparer avec TabPFN baseline
+
+---
+
+## 🎯 WORKFLOW GLOBAL DU PROJET
+
 ```
-✅ Cloner et comprendre le code TabPFN
-✅ Modifier l'architecture TabPFN
-✅ Fine-tuner TabPFN sur vos données
-✅ Adapter TabPFN à différentes données financières
-✅ Évaluer les améliorations
+┌─────────────────────────────────────────────────────────────────────┐
+│                         WORKFLOW COMPLET                            │
+└─────────────────────────────────────────────────────────────────────┘
+
+ÉTAPE 1 : BASELINE TABPFN (ce qui existe déjà)
+┌──────────────────────────────────────────────────┐
+│ Statap2_corrected.py                             │
+│   → Génère données SABR (volatilités seulement) │
+│   → Fichier : sabr_data_recovery.csv           │
+│                                                  │
+│ test_tabpfn.py                                  │
+│   → Teste TabPFN sur ces données               │
+│   → Résultat : MAE = 5e-5                      │
+└──────────────────────────────────────────────────┘
+                    ↓
+                    
+ÉTAPE 2 : AJOUT DES DÉRIVÉES (priorité Peter)
+┌──────────────────────────────────────────────────┐
+│ compute_derivatives.py                          │
+│   → Génère NOUVELLES données avec dérivées     │
+│   → Fichier : sabr_with_derivatives.csv        │
+│   → Contient : volatilités + 6 dérivées        │
+│                                                  │
+│   ⚠️ REMPLACE sabr_data_recovery.csv           │
+└──────────────────────────────────────────────────┘
+                    ↓
+                    
+ÉTAPE 3 : ENTRAÎNER MODÈLES CUSTOM
+┌──────────────────────────────────────────────────┐
+│ ray_architecture_search.py                      │
+│   → Lit : sabr_with_derivatives.csv            │
+│   → Entraîne 30-50 modèles différents          │
+│   → Utilise loss_with_derivatives.py           │
+│   → Teste TOUTES activations (Mish, GELU...)   │
+│   → Trouve la meilleure config                 │
+│   → Fichier : best_config.json                 │
+└──────────────────────────────────────────────────┘
+                    ↓
+                    
+ÉTAPE 4 : COMPARAISON FINALE
+┌──────────────────────────────────────────────────┐
+│ final_evaluation.py                             │
+│   → Compare TabPFN vs modèles custom           │
+│   → Utilise best_config.json                   │
+│   → Génère rapport final                       │
+└──────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 📚 PARTIE 1 : Comprendre TabPFN
+## 📂 FICHIERS DU PROJET - EXPLICATION CLAIRE
 
-### 1.1 Qu'est-ce que TabPFN ?
+### Groupe 1️⃣ : BASELINE (Déjà fait - Phase 1)
 
-**TabPFN = Tabular Prior-Data Fitted Network**
+#### `base_sabr.py` et `hagan_2002_lognormal_sabr.py`
+**Rôle :** Bibliothèques SABR (ne pas modifier)
+**Utilité :** Utilisées par les autres fichiers pour calculer volatilités SABR
 
-**Concept clé :**
-- Pré-entraîné sur des **millions de datasets synthétiques**
-- Utilise un **Transformer** pour faire des prédictions
-- **Pas besoin de fine-tuning** normalement (zero-shot)
-- **MAIS** on peut le fine-tuner pour l'améliorer !
-
-**Architecture :**
-```
-Input (features tabulaires)
-    ↓
-Embedding Layer
-    ↓
-Transformer Encoder (plusieurs layers)
-    ├── Multi-Head Attention
-    ├── Feed-Forward Network
-    └── Layer Normalization
-    ↓
-Prediction Head
-    ↓
-Output (prédiction)
+#### `Statap2_corrected.py`
+**Rôle :** Génère données SABR (volatilités uniquement)
+**Ce qu'il fait :**
+```python
+Pour chaque combinaison (beta, rho, volvol, v_atm, F):
+    Pour chaque strike K:
+        Calcule volatilité SABR
+        
+Résultat : CSV avec 5000 lignes
+Colonnes : [beta, rho, volvol, v_atm_n, alpha, F, K, log_moneyness, volatility]
 ```
 
-### 1.2 Structure du Code TabPFN
+**Fichier créé :** `sabr_data_recovery.csv`
 
-**Repository officiel :** https://github.com/automl/TabPFN
+**⚠️ IMPORTANT :** Ce fichier sera **REMPLACÉ** par `compute_derivatives.py` !
 
-**Fichiers importants :**
+#### `test_tabpfn.py`
+**Rôle :** Test baseline de TabPFN
+**Ce qu'il fait :**
+```python
+Charge sabr_data_recovery.csv
+Entraîne TabPFN (modèle pré-entraîné)
+Prédit volatilités
+Calcule MAE
 ```
-TabPFN/
-├── tabpfn/
-│   ├── __init__.py
-│   ├── scripts/
-│   │   ├── transformer_prediction_interface.py  ← Interface principale
-│   │   └── tabular_metrics.py                   ← Métriques
-│   ├── models/
-│   │   ├── tabpfn.py                           ← Modèle TabPFN
-│   │   ├── transformer.py                      ← Architecture Transformer
-│   │   └── bar_distribution.py                 ← Distribution priors
-│   ├── priors/
-│   │   └── utils.py                            ← Génération données synthétiques
-│   └── encoders/
-│       └── linear.py                           ← Encodeurs features
-└── setup.py
-```
+
+**Résultat :** MAE ≈ 5e-5 (excellent !)
 
 ---
 
-## 🚀 PARTIE 2 : Setup - Cloner et Explorer TabPFN
+### Groupe 2️⃣ : DÉRIVÉES (Phase 2 - Priorité Peter)
 
-### 2.1 Dans Google Colab
+#### `compute_derivatives.py` ⭐⭐⭐
+**Rôle :** GÉNÈRE DE NOUVELLES DONNÉES COMPLÈTES (volatilités + dérivées)
 
-**Cell 1 : Vérifier GPU**
-
+**Ce qu'il fait :**
 ```python
-import torch
-print(f"✅ GPU disponible: {torch.cuda.is_available()}")
-if torch.cuda.is_available():
-    print(f"GPU: {torch.cuda.get_device_name(0)}")
+Pour chaque combinaison (beta, rho, volvol, v_atm, F):
+    Pour chaque strike K:
+        1. Calcule volatilité SABR
+        2. Calcule ∂V/∂beta (dérivée par rapport à beta)
+        3. Calcule ∂V/∂rho
+        4. Calcule ∂V/∂volvol
+        5. Calcule ∂V/∂v_atm_n
+        6. Calcule ∂V/∂F (forward)
+        7. Calcule ∂V/∂K (strike)
+        
+Résultat : CSV avec 5000 lignes
+Colonnes : [beta, rho, volvol, ..., volatility, dV_dbeta, dV_drho, ...]
 ```
 
-**Cell 2 : Cloner TabPFN officiel**
+**Fichier créé :** `sabr_with_derivatives.csv`
 
-```python
-# Cloner le repository officiel TabPFN
-!git clone https://github.com/automl/TabPFN.git
-%cd TabPFN
+**🔑 RÉPONSE À VOTRE QUESTION :**
+> "Est-ce que statap2_corrected est inclus dans compute_derivatives ?"
 
-# Voir la structure
-!ls -la
+**OUI !** `compute_derivatives.py` fait TOUT ce que fait `Statap2_corrected.py` PLUS les dérivées.
+
+**Est-ce qu'on peut enlever Statap2_corrected ?**
+
+**OUI !** On peut simplifier en 2 scénarios :
+
+**SCÉNARIO A : Simple (utilise seulement volatilités)**
+```
+Statap2_corrected.py → sabr_data_recovery.csv → test_tabpfn.py
 ```
 
-**Cell 3 : Installer en mode développement**
-
-```python
-# Installation en mode éditable (-e)
-# Permet de modifier le code et voir les changements immédiatement
-!pip install -e .
-
-# Installer dépendances supplémentaires
-!pip install scikit-learn pandas numpy matplotlib seaborn
+**SCÉNARIO B : Complet (utilise volatilités + dérivées)** ⭐ RECOMMANDÉ
+```
+compute_derivatives.py → sabr_with_derivatives.csv → tout le reste
 ```
 
-**Cell 4 : Vérifier l'installation**
-
-```python
-from tabpfn import TabPFNClassifier, TabPFNRegressor
-print("✅ TabPFN importé avec succès!")
-
-# Voir la version
-import tabpfn
-print(f"Version: {tabpfn.__version__}")
-```
-
-### 2.2 Explorer le Code Source
-
-**Cell 5 : Examiner les fichiers principaux**
-
-```python
-# Voir le fichier principal du modèle
-!head -50 tabpfn/models/tabpfn.py
-
-# Voir l'architecture Transformer
-!head -50 tabpfn/models/transformer.py
-```
-
-**Cell 6 : Comprendre l'interface**
-
-```python
-# Lire le code de l'interface de prédiction
-with open('tabpfn/scripts/transformer_prediction_interface.py', 'r') as f:
-    lines = f.readlines()[:100]
-    print(''.join(lines))
-```
+**RÉPONSE :** Gardez les deux pour comparaison, mais **vous pouvez skip Statap2** et commencer directement avec `compute_derivatives.py` !
 
 ---
 
-## 🔧 PARTIE 3 : Modifier TabPFN
+#### `loss_with_derivatives.py`
+**Rôle :** Définit comment calculer l'erreur pendant l'entraînement
 
-### 3.1 Modification 1 : Changer l'Activation Function
+**POURQUOI CE FICHIER ?**
 
-**Objectif :** Remplacer GELU par Mish dans le Transformer
-
-**Cell 7 : Créer une fonction Mish**
-
+TabPFN baseline utilise une loss simple :
 ```python
-# Créer un fichier avec la nouvelle activation
-activation_code = """
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-class Mish(nn.Module):
-    '''
-    Mish activation function.
-    f(x) = x * tanh(softplus(x))
-    '''
-    def forward(self, x):
-        return x * torch.tanh(F.softplus(x))
-
-class Swish(nn.Module):
-    '''
-    Swish activation function.
-    f(x) = x * sigmoid(x)
-    '''
-    def forward(self, x):
-        return x * torch.sigmoid(x)
-"""
-
-with open('tabpfn/models/custom_activations.py', 'w') as f:
-    f.write(activation_code)
-
-print("✅ Fichier custom_activations.py créé")
+loss = |volatilité_prédite - volatilité_vraie|
 ```
 
-**Cell 8 : Modifier transformer.py**
-
+Nous voulons une loss qui inclut les dérivées :
 ```python
-# Lire le fichier transformer.py
-with open('tabpfn/models/transformer.py', 'r') as f:
-    transformer_code = f.read()
-
-# Ajouter import de notre activation
-new_import = "from .custom_activations import Mish, Swish\n"
-
-# Chercher où ajouter l'import
-import_section_end = transformer_code.find('\n\nclass')
-transformer_code = (transformer_code[:import_section_end] + 
-                   '\n' + new_import + 
-                   transformer_code[import_section_end:])
-
-# Remplacer GELU par Mish
-# Chercher les lignes avec nn.GELU()
-transformer_code = transformer_code.replace(
-    'nn.GELU()',
-    'Mish()  # Modified: was nn.GELU()'
-)
-
-# Sauvegarder le fichier modifié
-with open('tabpfn/models/transformer.py', 'w') as f:
-    f.write(transformer_code)
-
-print("✅ transformer.py modifié - GELU remplacé par Mish")
+loss = |volatilité_prédite - volatilité_vraie| + 
+       |dérivée_prédite - dérivée_vraie|
 ```
 
-**Cell 9 : Vérifier les modifications**
+**Ce qu'il contient :**
+- `DerivativeLoss` : Loss standard avec dérivées
+- `WeightedDerivativeLoss` : Certaines dérivées comptent plus
+- `HuberDerivativeLoss` : Robuste aux outliers
+- `AdaptiveDerivativeLoss` : Poids qui s'adaptent pendant training
 
-```python
-# Voir les changements
-!grep -n "Mish" tabpfn/models/transformer.py | head -10
-```
+**🔑 RÉPONSE À VOTRE QUESTION :**
+> "J'ai du mal à comprendre l'intérêt de loss_with_derivatives"
 
-### 3.2 Modification 2 : Changer le Nombre de Layers
+**Réponse :**
+- TabPFN peut prédire volatilités correctement MAIS prédire mal les dérivées
+- En ajoutant les dérivées dans la loss, on **FORCE** le modèle à apprendre AUSSI les pentes/gradients
+- Résultat : Le modèle comprend la **forme complète** de la surface de volatilité, pas juste les points
 
-**Cell 10 : Modifier la profondeur du Transformer**
-
-```python
-# Lire tabpfn.py
-with open('tabpfn/models/tabpfn.py', 'r') as f:
-    tabpfn_code = f.read()
-
-# Chercher la définition du nombre de layers
-# Typiquement : n_layers=12 ou similaire
-# Remplacer par 6 layers (plus léger)
-
-import re
-
-# Chercher et remplacer n_layers
-tabpfn_code = re.sub(
-    r"n_layers\s*=\s*\d+",
-    "n_layers=6  # Modified: was 12",
-    tabpfn_code
-)
-
-# Sauvegarder
-with open('tabpfn/models/tabpfn.py', 'w') as f:
-    f.write(tabpfn_code)
-
-print("✅ Nombre de layers modifié")
-```
-
-### 3.3 Modification 3 : Ajuster la Dimension d'Embedding
-
-**Cell 11 : Modifier emsize (embedding size)**
-
-```python
-# Chercher et modifier emsize
-with open('tabpfn/models/tabpfn.py', 'r') as f:
-    tabpfn_code = f.read()
-
-# Modifier emsize (par exemple de 512 à 256 pour plus léger)
-tabpfn_code = re.sub(
-    r"emsize\s*=\s*\d+",
-    "emsize=256  # Modified: was 512",
-    tabpfn_code
-)
-
-with open('tabpfn/models/tabpfn.py', 'w') as f:
-    f.write(tabpfn_code)
-
-print("✅ Embedding size modifié")
-```
+**Utilisé par :** `ray_architecture_search.py` et `final_evaluation.py`
 
 ---
 
-## 🎓 PARTIE 4 : Fine-tuner TabPFN sur Données Financières
+### Groupe 3️⃣ : RECHERCHE D'ARCHITECTURE (Phase 3)
 
-### 4.1 Préparer Vos Données SABR
+#### `ray_architecture_search.py` ⭐⭐⭐
+**Rôle :** Trouve automatiquement la MEILLEURE configuration de modèle
 
-**Cell 12 : Upload et préparer données**
-
+**Ce qu'il fait :**
 ```python
-from google.colab import files
-import pandas as pd
-import numpy as np
-
-# Upload vos données
-print("📤 Uploadez sabr_data_recovery.csv")
-uploaded = files.upload()
-
-# Charger
-df = pd.read_csv('sabr_data_recovery.csv')
-print(f"✅ {len(df)} échantillons chargés")
-print(f"Colonnes: {df.columns.tolist()}")
+Pour 30-50 configurations différentes:
+    Créer un modèle avec :
+        - Activation aléatoire (Mish, GELU, Swish, ou SELU)
+        - Architecture aléatoire (Transformer ou MLP)
+        - Hyperparamètres aléatoires (learning rate, layers, etc.)
+    
+    Charger sabr_with_derivatives.csv
+    Entraîner le modèle avec loss_with_derivatives
+    Calculer MAE sur test set
+    
+Garder la MEILLEURE configuration
+Sauvegarder dans best_config.json
 ```
 
-**Cell 13 : Préparer X et y**
+**Fichier créé :** `ray_results/best_config.json`
 
-```python
-from sklearn.model_selection import train_test_split
-
-# Features
-feature_cols = ['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']
-X = df[feature_cols].values
-
-# Target
-if 'y_scaled' in df.columns:
-    y = df['y_scaled'].values
-elif 'volatility_output' in df.columns:
-    y = df['volatility_output'].values
-else:
-    y = df['volatility'].values
-
-# Split
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.3, random_state=42
-)
-
-print(f"Train: {len(X_train)} samples")
-print(f"Test: {len(X_test)} samples")
-```
-
-### 4.2 Tester TabPFN Modifié (Sans Fine-tuning)
-
-**Cell 14 : Test avec votre TabPFN modifié**
-
-```python
-from tabpfn import TabPFNRegressor
-from sklearn.metrics import mean_absolute_error, r2_score
-import time
-
-print("🔥 Test TabPFN MODIFIÉ (Mish activation)")
-
-# Créer le modèle (utilise VOTRE version modifiée!)
-regressor = TabPFNRegressor(
-    device='cuda' if torch.cuda.is_available() else 'cpu',
-    N_ensemble_configurations=4
-)
-
-# Entraîner
-start = time.time()
-regressor.fit(X_train, y_train)
-train_time = time.time() - start
-
-# Prédire
-predictions = regressor.predict(X_test)
-
-# Évaluer
-mae = mean_absolute_error(y_test, predictions)
-r2 = r2_score(y_test, predictions)
-
-print(f"\n{'='*60}")
-print(f"RÉSULTATS TabPFN MODIFIÉ")
-print(f"{'='*60}")
-print(f"MAE:        {mae:.8f}")
-print(f"R²:         {r2:.6f}")
-print(f"Train time: {train_time:.2f}s")
-print(f"{'='*60}")
-```
-
-### 4.3 Fine-tuner TabPFN (Méthode Avancée)
-
-**⚠️ Note :** TabPFN n'est pas conçu pour être fine-tuné traditionnellement. Mais on peut :
-1. Ré-entraîner les dernières couches
-2. Utiliser l'architecture pour créer un nouveau modèle
-3. Adapter les priors
-
-**Cell 15 : Accéder au modèle interne**
-
-```python
-# Accéder au modèle Transformer interne
-internal_model = regressor.model[2]  # Le transformer est le 3ème élément
-
-print("Architecture interne:")
-print(internal_model)
-
-# Voir les paramètres
-total_params = sum(p.numel() for p in internal_model.parameters())
-print(f"\nNombre de paramètres: {total_params:,}")
-```
-
-**Cell 16 : Fine-tuning des dernières couches**
-
-```python
-import torch.optim as optim
-import torch.nn as nn
-
-# Préparer les données
-X_train_tensor = torch.FloatTensor(X_train)
-y_train_tensor = torch.FloatTensor(y_train).unsqueeze(1)
-
-# Mettre le modèle en mode entraînement
-internal_model.train()
-
-# Geler toutes les couches sauf les dernières
-for name, param in internal_model.named_parameters():
-    if 'decoder' not in name and 'output' not in name:
-        param.requires_grad = False  # Geler
-    else:
-        param.requires_grad = True   # Fine-tuner
-
-# Optimizer sur les paramètres non-gelés
-trainable_params = [p for p in internal_model.parameters() if p.requires_grad]
-optimizer = optim.Adam(trainable_params, lr=1e-4)
-criterion = nn.MSELoss()
-
-# Fine-tuning loop
-print("\n🔥 Fine-tuning des dernières couches...")
-num_epochs = 50
-batch_size = 128
-
-for epoch in range(num_epochs):
-    # Mini-batch training
-    indices = torch.randperm(len(X_train_tensor))
-    
-    epoch_loss = 0
-    for i in range(0, len(indices), batch_size):
-        batch_indices = indices[i:i+batch_size]
-        batch_X = X_train_tensor[batch_indices]
-        batch_y = y_train_tensor[batch_indices]
-        
-        # Forward pass
-        optimizer.zero_grad()
-        
-        # TabPFN attend un format spécifique
-        # Adapter selon l'architecture interne
-        # (Cette partie dépend de la version exacte de TabPFN)
-        
-        # Exemple simplifié (à adapter):
-        # outputs = internal_model(batch_X)
-        # loss = criterion(outputs, batch_y)
-        
-        # Backward et optimization
-        # loss.backward()
-        # optimizer.step()
-        
-        # epoch_loss += loss.item()
-    
-    if (epoch + 1) % 10 == 0:
-        print(f"Epoch {epoch+1}/{num_epochs}, Loss: {epoch_loss/len(indices):.6f}")
-
-print("✅ Fine-tuning terminé")
-```
-
-**⚠️ Note importante :** Le code ci-dessus est un template. L'implémentation exacte dépend de la structure interne de TabPFN qui peut varier selon la version.
-
----
-
-## 📊 PARTIE 5 : Comparer Différentes Modifications
-
-### 5.1 Créer un Benchmark des Modifications
-
-**Cell 17 : Framework de comparaison**
-
-```python
-import pandas as pd
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-
-class TabPFNBenchmark:
-    """Compare différentes modifications de TabPFN"""
-    
-    def __init__(self, X_train, X_test, y_train, y_test):
-        self.X_train = X_train
-        self.X_test = X_test
-        self.y_train = y_train
-        self.y_test = y_test
-        self.results = []
-    
-    def test_configuration(self, name, model):
-        """Test une configuration de TabPFN"""
-        import time
-        
-        print(f"\n🔥 Test: {name}")
-        
-        # Entraîner
-        start = time.time()
-        model.fit(self.X_train, self.y_train)
-        train_time = time.time() - start
-        
-        # Prédire
-        predictions = model.predict(self.X_test)
-        
-        # Métriques
-        mae = mean_absolute_error(self.y_test, predictions)
-        rmse = np.sqrt(mean_squared_error(self.y_test, predictions))
-        r2 = r2_score(self.y_test, predictions)
-        
-        # Stocker
-        self.results.append({
-            'Configuration': name,
-            'MAE': mae,
-            'RMSE': rmse,
-            'R²': r2,
-            'Train Time (s)': train_time
-        })
-        
-        print(f"MAE: {mae:.8f}, R²: {r2:.6f}, Time: {train_time:.2f}s")
-    
-    def summary(self):
-        """Afficher le tableau de résultats"""
-        df = pd.DataFrame(self.results)
-        df = df.sort_values('MAE')
-        
-        print("\n" + "="*80)
-        print("RÉSULTATS COMPARATIFS")
-        print("="*80)
-        print(df.to_string(index=False))
-        print("="*80)
-        
-        return df
-
-# Créer le benchmark
-benchmark = TabPFNBenchmark(X_train, X_test, y_train, y_test)
-```
-
-**Cell 18 : Tester différentes configurations**
-
-```python
-from tabpfn import TabPFNRegressor
-
-# Configuration 1 : TabPFN original (baseline)
-# Pour tester l'original, réinstallez TabPFN standard
-# !pip install --force-reinstall tabpfn
-
-# Configuration 2 : Votre TabPFN modifié (Mish activation)
-model_mish = TabPFNRegressor(device='cuda', N_ensemble_configurations=4)
-benchmark.test_configuration("TabPFN + Mish Activation", model_mish)
-
-# Configuration 3 : Avec moins de layers (si vous avez modifié)
-# model_light = TabPFNRegressor(device='cuda', N_ensemble_configurations=4)
-# benchmark.test_configuration("TabPFN Light (6 layers)", model_light)
-
-# Afficher résumé
-results_df = benchmark.summary()
-```
-
----
-
-## 🌍 PARTIE 6 : Adapter à D'autres Données Financières
-
-### 6.1 Exemples de Datasets Financiers
-
-**Cell 19 : Générer des datasets financiers variés**
-
-```python
-def generate_black_scholes_data(n_samples=5000):
-    """Génère des prix d'options Black-Scholes"""
-    from scipy.stats import norm
-    
-    np.random.seed(42)
-    
-    # Paramètres
-    S = np.random.uniform(50, 150, n_samples)    # Spot price
-    K = np.random.uniform(50, 150, n_samples)    # Strike
-    T = np.random.uniform(0.1, 2.0, n_samples)   # Time to maturity
-    r = np.random.uniform(0.01, 0.05, n_samples) # Risk-free rate
-    sigma = np.random.uniform(0.1, 0.5, n_samples) # Volatility
-    
-    # Black-Scholes formula
-    d1 = (np.log(S/K) + (r + 0.5*sigma**2)*T) / (sigma*np.sqrt(T))
-    d2 = d1 - sigma*np.sqrt(T)
-    
-    call_price = S*norm.cdf(d1) - K*np.exp(-r*T)*norm.cdf(d2)
-    
-    X = np.column_stack([S, K, T, r, sigma])
-    y = call_price
-    
-    return X, y
-
-# Générer
-X_bs, y_bs = generate_black_scholes_data()
-print(f"✅ Black-Scholes data: {X_bs.shape}")
-
-def generate_bond_pricing_data(n_samples=5000):
-    """Génère des prix d'obligations"""
-    np.random.seed(42)
-    
-    # Paramètres
-    coupon_rate = np.random.uniform(0.01, 0.08, n_samples)
-    yield_rate = np.random.uniform(0.01, 0.08, n_samples)
-    maturity = np.random.uniform(1, 30, n_samples)
-    face_value = np.random.choice([100, 1000], n_samples)
-    
-    # Prix de l'obligation (approximation)
-    C = coupon_rate * face_value
-    bond_price = (C * (1 - (1 + yield_rate)**(-maturity)) / yield_rate + 
-                  face_value / (1 + yield_rate)**maturity)
-    
-    X = np.column_stack([coupon_rate, yield_rate, maturity, face_value])
-    y = bond_price
-    
-    return X, y
-
-# Générer
-X_bond, y_bond = generate_bond_pricing_data()
-print(f"✅ Bond pricing data: {X_bond.shape}")
-```
-
-### 6.2 Tester TabPFN sur Différents Datasets
-
-**Cell 20 : Évaluation multi-datasets**
-
-```python
-from sklearn.model_selection import train_test_split
-
-datasets = {
-    'SABR Volatility': (X, y),
-    'Black-Scholes Options': (X_bs, y_bs),
-    'Bond Pricing': (X_bond, y_bond)
+**Exemple de best_config.json :**
+```json
+{
+  "activation": "mish",
+  "model_type": "transformer",
+  "d_model": 256,
+  "num_layers": 4,
+  "learning_rate": 0.001,
+  "batch_size": 64
 }
+```
 
-results_multi = []
+**🔑 RÉPONSE À VOTRE QUESTION :**
+> "On ne réutilise pas ce qui est fait précédemment ?"
 
-for dataset_name, (X_data, y_data) in datasets.items():
-    print(f"\n{'='*60}")
-    print(f"Dataset: {dataset_name}")
-    print(f"{'='*60}")
-    
-    # Split
-    X_tr, X_te, y_tr, y_te = train_test_split(X_data, y_data, test_size=0.3, random_state=42)
-    
-    # Entraîner TabPFN
-    model = TabPFNRegressor(device='cuda', N_ensemble_configurations=4)
-    model.fit(X_tr, y_tr)
-    
-    # Prédire
-    preds = model.predict(X_te)
-    
-    # Métriques
-    mae = mean_absolute_error(y_te, preds)
-    r2 = r2_score(y_te, preds)
-    
-    results_multi.append({
-        'Dataset': dataset_name,
-        'MAE': mae,
-        'R²': r2,
-        'N_samples': len(X_data),
-        'N_features': X_data.shape[1]
-    })
-    
-    print(f"MAE: {mae:.6f}")
-    print(f"R²: {r2:.6f}")
+**Si !** Ce fichier :
+1. **Lit** `sabr_with_derivatives.csv` (généré par compute_derivatives.py)
+2. **Utilise** les classes de loss dans `loss_with_derivatives.py`
+3. **Génère** `best_config.json` utilisé par `final_evaluation.py`
 
-# Résumé
-df_multi = pd.DataFrame(results_multi)
-print(f"\n{'='*60}")
-print("RÉSULTATS MULTI-DATASETS")
-print(f"{'='*60}")
-print(df_multi.to_string(index=False))
+**Chaîne de dépendances :**
+```
+compute_derivatives.py → sabr_with_derivatives.csv
+                              ↓
+loss_with_derivatives.py ←───┤
+                              ↓
+ray_architecture_search.py → best_config.json
+                              ↓
+                     final_evaluation.py
 ```
 
 ---
 
-## 📝 PARTIE 7 : Documenter Vos Modifications
+### Groupe 4️⃣ : ÉVALUATION (Phase 4)
 
-### 7.1 Créer un Rapport de Modifications
+#### `final_evaluation.py`
+**Rôle :** Compare TOUS les modèles et génère le rapport final
 
-**Cell 21 : Générer rapport automatique**
-
+**Ce qu'il fait :**
 ```python
-import json
-from datetime import datetime
-
-# Documenter les modifications
-modifications_log = {
-    'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-    'modifications': [
-        {
-            'fichier': 'tabpfn/models/transformer.py',
-            'changement': 'GELU → Mish activation',
-            'ligne': '~150',
-            'raison': 'Mish montre de meilleures performances sur données financières'
-        },
-        {
-            'fichier': 'tabpfn/models/tabpfn.py',
-            'changement': 'n_layers: 12 → 6',
-            'ligne': '~80',
-            'raison': 'Réduire la complexité pour datasets plus petits'
-        },
-        {
-            'fichier': 'tabpfn/models/tabpfn.py',
-            'changement': 'emsize: 512 → 256',
-            'ligne': '~85',
-            'raison': 'Alléger le modèle'
-        }
-    ],
-    'resultats': results_df.to_dict('records') if 'results_df' in locals() else []
-}
-
-# Sauvegarder
-with open('modifications_log.json', 'w') as f:
-    json.dump(modifications_log, f, indent=2)
-
-print("✅ Rapport sauvegardé: modifications_log.json")
-
-# Afficher
-print(json.dumps(modifications_log, indent=2))
+1. Charge sabr_with_derivatives.csv
+2. Teste TabPFN baseline (pour comparaison)
+3. Entraîne modèle Transformer avec Mish
+4. Entraîne modèle Transformer avec GELU
+5. Entraîne modèle Transformer avec Swish
+6. Entraîne modèle Transformer avec SELU
+7. Compare tous les résultats
+8. Génère tableaux et graphiques
 ```
 
-### 7.2 Créer un README pour Votre Version
+**Fichiers créés :**
+- `final_evaluation_results.csv` : Tableau comparatif
+- `final_evaluation_report.md` : Rapport pour Peter
+- `final_evaluation_plots.png` : Graphiques
 
-**Cell 22 : Générer README**
+**🔑 RÉPONSE À VOTRE QUESTION :**
+> "On ne réutilise pas best_config.json ?"
 
-```python
-readme_content = """# TabPFN Modifié pour Finance
+**Bonne remarque !** Dans ma version actuelle, `final_evaluation.py` teste plusieurs configs prédéfinies.
 
-## Modifications Apportées
+**VERSION AMÉLIORÉE :** Il devrait charger `best_config.json` et tester cette config en priorité.
 
-### 1. Activation Function
-- **Original:** GELU
-- **Modifié:** Mish
-- **Fichier:** `tabpfn/models/transformer.py`
-- **Raison:** Mish offre de meilleures performances sur données financières lisses
+---
 
-### 2. Architecture
-- **n_layers:** 12 → 6 (allégement)
-- **emsize:** 512 → 256 (allégement)
-- **Fichier:** `tabpfn/models/tabpfn.py`
+### Groupe 5️⃣ : AMÉLIORATIONS BONUS
 
-## Résultats
+#### `advanced_improvements.py`
+**Rôle :** Techniques avancées optionnelles
+**Contenu :** Data augmentation, ensemble, curriculum learning, etc.
+**Utilité :** Bonus si vous voulez aller plus loin
 
-### Sur SABR Volatility
-- MAE: {mae_sabr:.8f}
-- R²: {r2_sabr:.6f}
+#### `master_execution_guide.py`
+**Rôle :** Lance tout automatiquement
+**Utilité :** Au lieu de lancer chaque fichier manuellement
 
-### Sur Black-Scholes
-- MAE: {mae_bs:.6f}
-- R²: {r2_bs:.6f}
+---
 
-## Installation
+## 🔄 DÉPENDANCES ENTRE FICHIERS
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    GRAPHE DE DÉPENDANCES                     │
+└─────────────────────────────────────────────────────────────┘
+
+base_sabr.py ─────┐
+                  ├──→ compute_derivatives.py
+hagan_2002_*.py ──┘           │
+                              ↓
+                   sabr_with_derivatives.csv
+                              │
+                              ├──→ ray_architecture_search.py
+                              │           │
+                              │           ↓
+loss_with_derivatives.py ─────┤    best_config.json
+                              │           │
+                              │           ↓
+                              └──→ final_evaluation.py
+                                          │
+                                          ↓
+                              final_evaluation_results.csv
+                              final_evaluation_report.md
+```
+
+---
+
+## 🎯 WORKFLOW SIMPLIFIÉ RECOMMANDÉ
+
+### Option 1 : Workflow Complet (Recommandé)
 
 ```bash
-git clone https://github.com/automl/TabPFN.git
-cd TabPFN
-# Appliquer les modifications (voir modifications_log.json)
-pip install -e .
+# Étape 1 : Générer données avec dérivées
+python compute_derivatives.py
+# → Crée sabr_with_derivatives.csv
+
+# Étape 2 : Trouver meilleure config automatiquement
+python ray_architecture_search.py --data sabr_with_derivatives.csv --samples 30
+# → Crée best_config.json
+
+# Étape 3 : Évaluation finale
+python final_evaluation.py --data sabr_with_derivatives.csv
+# → Crée rapport final
 ```
 
-## Utilisation
+**Durée totale :** 2-4 heures
 
+### Option 2 : Workflow Rapide (Sans Ray Tune)
+
+```bash
+# Étape 1 : Générer données avec dérivées
+python compute_derivatives.py
+
+# Étape 2 : Évaluation directe (skip Ray Tune)
+python final_evaluation.py --data sabr_with_derivatives.csv
+```
+
+**Durée totale :** 30-45 minutes
+
+### Option 3 : Baseline Simple (Pour Comparaison)
+
+```bash
+# Étape 1 : Générer données baseline
+python Statap2_corrected.py
+
+# Étape 2 : Tester TabPFN baseline
+python test_tabpfn.py
+```
+
+**Durée totale :** 5 minutes
+
+---
+
+## ❓ RÉPONSES À VOS QUESTIONS
+
+### Q1 : "Est-ce que statap2_corrected est inclus dans compute_derivatives ?"
+
+**Réponse : OUI !**
+
+`compute_derivatives.py` génère :
+- Toutes les colonnes de `Statap2_corrected.py` (volatilités)
+- PLUS 6 colonnes supplémentaires (dérivées)
+
+**Tableau comparatif :**
+
+| Fichier | Colonnes | Nombre |
+|---------|----------|--------|
+| `Statap2_corrected.py` | beta, rho, volvol, v_atm_n, alpha, F, K, log_moneyness, **volatility** | 9 |
+| `compute_derivatives.py` | beta, rho, volvol, v_atm_n, alpha, F, K, log_moneyness, **volatility, dV_dbeta, dV_drho, dV_dvolvol, dV_dvatm, dV_dF, dV_dK** | 15 |
+
+### Q2 : "Est-ce qu'on peut enlever Statap2_corrected ?"
+
+**Réponse : OUI, on peut simplifier !**
+
+**Scénario Recommandé :**
+1. Gardez `Statap2_corrected.py` uniquement pour tester TabPFN baseline rapidement
+2. Utilisez `compute_derivatives.py` pour TOUT le reste du projet
+
+**Workflow simplifié :**
+```bash
+# Comparaison baseline (optionnel)
+python Statap2_corrected.py
+python test_tabpfn.py
+
+# ↓↓↓ PROJET PRINCIPAL ↓↓↓
+python compute_derivatives.py
+python ray_architecture_search.py
+python final_evaluation.py
+```
+
+### Q3 : "Modifier test_tabpfn pour utiliser derivatives en entrée ?"
+
+**Réponse : Oui mais NON recommandé.**
+
+**Pourquoi ?**
+
+TabPFN est un modèle **pré-entraîné** qui :
+- Attend un certain nombre de features en entrée
+- Est optimisé pour prédire UNE sortie
+- Ne peut PAS prédire plusieurs sorties (volatilité + 6 dérivées)
+
+**Solution :**
+- Gardez `test_tabpfn.py` comme baseline (prédit seulement volatilité)
+- Les nouveaux modèles custom (dans `ray_architecture_search.py`) prédisent volatilité + dérivées
+
+**Comparaison :**
+```
+TabPFN :    [features] → [volatilité]
+Nos modèles: [features] → [volatilité, dV_dbeta, dV_drho, ...]
+```
+
+### Q4 : "Peter a parlé de créer de la data avec des graphes comme dans le papier ?"
+
+**Réponse : OUI, mais je ne l'ai PAS encore implémenté (c'est optionnel/avancé).**
+
+**Ce que Peter veut dire :**
+
+Dans le paper TabPFN, ils génèrent des **datasets synthétiques** en utilisant des **graphes causaux**.
+
+**Exemple de graphe causal financier :**
+```
+Interest Rate → Bond Price
+      ↓
+Option Price ← Volatility → Strike
+      ↓
+    Greeks
+```
+
+**Ce que ça donnerait pour SABR :**
 ```python
-from tabpfn import TabPFNRegressor
-
-model = TabPFNRegressor(device='cuda')
-model.fit(X_train, y_train)
-predictions = model.predict(X_test)
+# Définir relations causales
+beta → volatility
+rho → volatility
+volvol → volatility
+F → volatility → dV/dF
+K → volatility → dV/dK
 ```
 
-## Auteur
-[Votre Nom]
+**Pourquoi Peter suggère ça :**
+- Générer beaucoup plus de données variées
+- Capturer les vraies relations causales
+- Améliorer la généralisation
 
-## Date
-{date}
-"""
+**Status :** C'est une **amélioration avancée** (Phase 5 optionnelle).
 
-# Remplir avec vos résultats
-readme = readme_content.format(
-    mae_sabr=mae if 'mae' in locals() else 0,
-    r2_sabr=r2 if 'r2' in locals() else 0,
-    mae_bs=0,  # À remplir avec vos résultats
-    r2_bs=0,   # À remplir avec vos résultats
-    date=datetime.now().strftime('%Y-%m-%d')
-)
-
-with open('README_MODIFIED.md', 'w') as f:
-    f.write(readme)
-
-print("✅ README créé: README_MODIFIED.md")
-```
+**Voulez-vous que je l'implémente ?** Ce serait un fichier supplémentaire : `causal_data_generation.py`
 
 ---
 
-## 🎯 PARTIE 8 : Workflow Complet Recommandé
+## 🎯 PROJET RÉORGANISÉ - VERSION CLAIRE
 
-### Workflow pour Vos Expériences
+Suite à vos remarques, voici la structure SIMPLIFIÉE :
 
-```python
-# ═══════════════════════════════════════════════════════════
-# WORKFLOW COMPLET - Copier tout ce bloc
-# ═══════════════════════════════════════════════════════════
+### Fichiers ESSENTIELS (Minimum)
 
-# 1. SETUP
-!git clone https://github.com/automl/TabPFN.git
-%cd TabPFN
-!pip install -e .
+```
+1. compute_derivatives.py       # Génère TOUTES les données
+2. loss_with_derivatives.py     # Définit loss pour entraînement
+3. ray_architecture_search.py   # Trouve meilleure config
+4. final_evaluation.py          # Compare et génère rapport
+```
 
-# 2. MODIFICATIONS
-# Créer custom_activations.py
-# Modifier transformer.py (GELU → Mish)
-# Modifier tabpfn.py (layers, emsize)
+### Fichiers OPTIONNELS
 
-# 3. DONNÉES
-from google.colab import files
-uploaded = files.upload()  # Upload sabr_data_recovery.csv
-
-# 4. PRÉPARER
-import pandas as pd
-import numpy as np
-from sklearn.model_selection import train_test_split
-
-df = pd.read_csv('sabr_data_recovery.csv')
-X = df[['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']].values
-y = df['y_scaled'].values if 'y_scaled' in df else df['volatility_output'].values
-
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
-
-# 5. TESTER TabPFN MODIFIÉ
-from tabpfn import TabPFNRegressor
-from sklearn.metrics import mean_absolute_error, r2_score
-
-model = TabPFNRegressor(device='cuda')
-model.fit(X_train, y_train)
-preds = model.predict(X_test)
-
-mae = mean_absolute_error(y_test, preds)
-r2 = r2_score(y_test, preds)
-
-print(f"MAE: {mae:.8f}")
-print(f"R²: {r2:.6f}")
-
-# 6. DOCUMENTER
-# Sauvegarder les résultats
-# Créer modifications_log.json
-# Télécharger le code modifié
-
-# 7. TÉLÉCHARGER
-files.download('modifications_log.json')
-files.download('README_MODIFIED.md')
+```
+5. Statap2_corrected.py        # Baseline rapide (optionnel)
+6. test_tabpfn.py              # Test TabPFN baseline (optionnel)
+7. advanced_improvements.py     # Techniques bonus (optionnel)
+8. master_execution_guide.py   # Automatisation (optionnel)
 ```
 
 ---
 
-## 📚 PARTIE 9 : Ressources et Références
+## 🚀 COMMANDES POUR DÉMARRER
 
-### 9.1 Papers à Lire
+### Workflow Minimum (2-3 heures)
 
-1. **TabPFN Original**
-   - "TabPFN: A Transformer That Solves Small Tabular Classification Problems in a Second"
-   - https://arxiv.org/abs/2207.01848
+```bash
+# 1. Installer dépendances
+pip install torch tabpfn "ray[tune]" optuna scikit-learn pandas numpy matplotlib
 
-2. **Mish Activation**
-   - "Mish: A Self Regularized Non-Monotonic Activation Function"
-   - https://arxiv.org/abs/1908.08681
+# 2. Générer données complètes
+python compute_derivatives.py
+# Résultat : sabr_with_derivatives.csv
 
-3. **Transformers for Tabular Data**
-   - "Revisiting Deep Learning Models for Tabular Data"
-   - https://arxiv.org/abs/2106.11959
+# 3. Recherche automatique
+python ray_architecture_search.py --data sabr_with_derivatives.csv --samples 30
+# Résultat : best_config.json
 
-### 9.2 Code Source Utile
-
-**Fichiers à étudier en priorité :**
-```
-tabpfn/models/transformer.py     ← Architecture Transformer
-tabpfn/models/tabpfn.py          ← Modèle principal
-tabpfn/priors/utils.py           ← Génération données synthétiques
+# 4. Évaluation finale
+python final_evaluation.py --data sabr_with_derivatives.csv
+# Résultat : rapport final pour Peter
 ```
 
-### 9.3 Communauté
+### Workflow Rapide (30 min - Sans Ray Tune)
 
-- **GitHub Issues:** https://github.com/automl/TabPFN/issues
-- **Discord AutoML:** https://discord.gg/automl (si existe)
+```bash
+# 1. Générer données
+python compute_derivatives.py
 
----
-
-## ✅ CHECKLIST PROJET
-
-### Étape 1 : Comprendre TabPFN
-- [ ] Cloner le repository
-- [ ] Explorer la structure du code
-- [ ] Lire les fichiers principaux
-- [ ] Comprendre l'architecture Transformer
-
-### Étape 2 : Modifier TabPFN
-- [ ] Changer activation (GELU → Mish)
-- [ ] Ajuster nombre de layers
-- [ ] Modifier embedding size
-- [ ] Tester les modifications
-
-### Étape 3 : Évaluer
-- [ ] Tester sur données SABR
-- [ ] Comparer avec TabPFN original
-- [ ] Tester sur autres datasets financiers
-- [ ] Documenter les résultats
-
-### Étape 4 : Rapport Final
-- [ ] Créer modifications_log.json
-- [ ] Écrire README_MODIFIED.md
-- [ ] Préparer slides/rapport pour Peter
-- [ ] Sauvegarder le code modifié
+# 2. Évaluation directe
+python final_evaluation.py --data sabr_with_derivatives.csv
+```
 
 ---
 
-## 🎉 CONCLUSION
+## 📊 CE QUE VOUS OBTENEZ À LA FIN
 
-**Vous avez maintenant :**
-1. ✅ Compris comment TabPFN fonctionne
-2. ✅ Appris à modifier son code source
-3. ✅ Testé sur données SABR
-4. ✅ Framework pour tester sur autres données financières
-5. ✅ Méthode pour documenter vos expériences
+### Résultats Concrets
 
-**Pour Peter, vous pouvez maintenant dire :**
-> "J'ai étudié l'architecture TabPFN, modifié l'activation function de GELU à Mish, 
-> ajusté les hyperparamètres, et testé sur des données financières SABR et Black-Scholes.
-> Mes modifications améliorent le MAE de X% sur les données SABR."
+1. **Fichier CSV avec données :** `sabr_with_derivatives.csv`
+   - 5000 lignes
+   - 15 colonnes (features + volatilité + 6 dérivées)
 
-**C'est exactement ce qu'il attendait ! 🚀**
+2. **Meilleure configuration :** `best_config.json`
+   - Quelle activation fonctionne le mieux (Mish, GELU, etc.)
+   - Quels hyperparamètres sont optimaux
+
+3. **Rapport final :** `final_evaluation_report.md`
+   - Comparaison TabPFN vs modèles custom
+   - Tableaux de résultats
+   - Recommandations pour Peter
+
+4. **Preuves visuelles :** `final_evaluation_plots.png`
+   - Graphiques de performance
+   - Comparaison MAE
 
 ---
 
-*Guide créé le 1er Février 2026*
+## 📝 MODIFICATIONS À FAIRE POUR CLARIFIER
+
+Je vais créer **3 nouveaux fichiers corrigés** :
+
+1. **`WORKFLOW_COMPLET.md`** - Flowchart visuel clair
+2. **`compute_derivatives_standalone.py`** - Version all-in-one qui remplace Statap2
+3. **`final_evaluation_improved.py`** - Version qui utilise best_config.json
+
+**Voulez-vous que je les crée maintenant ?**
+
+---
+
+## ✅ RÉSUMÉ FINAL
+
+**Le projet en 3 phrases :**
+1. On génère des données SABR avec volatilités + dérivées
+2. On entraîne des modèles qui prédisent les deux simultanément
+3. On trouve quelle activation (Mish/GELU/etc.) marche le mieux
+
+**Fichiers à lancer dans l'ordre :**
+1. `compute_derivatives.py`
+2. `ray_architecture_search.py`
+3. `final_evaluation.py`
+
+**Tout le reste est optionnel ou supportif !**
+
+---
+
+**Est-ce plus clair maintenant ? Ai-je répondu à toutes vos questions ?** 🎯

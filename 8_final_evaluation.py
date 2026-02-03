@@ -20,8 +20,8 @@ try:
 except:
     TABPFN_AVAILABLE = False
 
-from ray_architecture_search import TabularTransformer, DeepMLP, get_activation
-from 6loss_with_derivatives import create_loss_function
+from step7_ray_architecture_search import TabularTransformer, DeepMLP, get_activation
+from step6_loss_with_derivatives import create_loss_function
 
 
 class FinalEvaluator:
