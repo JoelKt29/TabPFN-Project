@@ -459,7 +459,7 @@ def run_ray_tune_search(
         num_samples=num_samples,
     ),
     param_space=search_space,
-    un_config=train.RunConfig(
+    run_config=train.RunConfig(
     name="sabr_tabpfn_search",
     storage_path=os.path.abspath(output_dir),)
     )
