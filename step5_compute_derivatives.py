@@ -306,7 +306,7 @@ if __name__ == "__main__":
     
     # Generate data with derivatives
     df = generate_sabr_with_derivatives(
-        num_samples=5000,
+        num_samples=1024,
         num_strikes=8,
         epsilon=1e-6
     )

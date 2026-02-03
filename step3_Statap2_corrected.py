@@ -12,7 +12,7 @@ T = 1.0
 SHIFT = 0.0
 NUM_STRIKES = 8     
 MAX_CONFIGS = 625   
-MAX_SAMPLES = 5000  
+MAX_SAMPLES = 1024  
 
 print(f"Génération de {MAX_SAMPLES} échantillons avec Grille Structurée (8 strikes)...")
 
