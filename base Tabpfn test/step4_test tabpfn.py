@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import json
+import torch
 from tabpfn import TabPFNRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
