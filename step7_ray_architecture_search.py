@@ -29,7 +29,7 @@ except ImportError:
     RAY_AVAILABLE = False
     print("⚠️ Ray Tune not installed. Install with: pip install 'ray[tune]' optuna")
 
-from loss_with_derivatives import create_loss_function
+from step6_loss_with_derivatives import create_loss_function
 
 
 # ============================================================================
