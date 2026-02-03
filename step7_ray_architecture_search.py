@@ -449,22 +449,22 @@ def run_ray_tune_search(
     abs_output_dir = os.path.abspath(output_dir)
     # Run tuning
     tuner = tune.Tuner(
-    tune.with_resources(
-        train_model_ray,
-        resources={"cpu": 2, "gpu": 1}
-    ),
-    tune_config=tune.TuneConfig(
-        scheduler=scheduler,
-        search_alg=search_alg,
-        num_samples=num_samples,
-        verbose=1,   # ✅ ici uniquement
-    ),
-    param_space=search_space,
-    run_config=train.RunConfig(
-        name="sabr_tabpfn_search",
-        storage_path=os.path.abspath(output_dir),
-    )
-)
+        tune.with_resources(
+            train_model_ray,
+            resources={"cpu": 1, "gpu": gpus_per_trial}
+        ),
+        tune_config=tune.TuneConfig(
+            scheduler=scheduler,
+            search_alg=search_alg,
+            num_samples=num_samples,
+            # NE METS PAS verbose ICI
+        ),
+        param_space=search_space,
+        run_config=train.RunConfig(
+            name="sabr_tabpfn_search",
+            storage_path=abs_output_dir,
+            verbose=1  # <--- C'est ICI que l'argument verbose doit être placé
+        ))
     
     results = tuner.fit()
     
