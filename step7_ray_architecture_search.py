@@ -15,6 +15,7 @@ os.environ['RAY_DEDUP_LOGS'] = '0'  # Reduce Ray logging
 import numpy as np
 import pandas as pd
 import torch
+import os
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 import json
@@ -445,6 +446,8 @@ def run_ray_tune_search(
     print(f"Results will be saved to: {output_dir}")
     print("="*80)
     
+
+    abs_output_dir = os.path.abspath(output_dir)
     # Run tuning
     tuner = tune.Tuner(
         tune.with_resources(
@@ -459,7 +462,7 @@ def run_ray_tune_search(
         param_space=search_space,
         run_config=train.RunConfig(
             name="sabr_tabpfn_search",
-            storage_path=output_dir,
+            storage_path=abs_output_dir, # <-- Utilise la variable abs_output_dir ici
         )
     )
     
