@@ -8,6 +8,7 @@ Tests automatiques:
 
 import os
 os.environ['RAY_DEDUP_LOGS'] = '0'  # Reduce Ray logging
+data_path = os.path.abspath('sabr_with_derivatives_scaled.csv')
 
 import numpy as np
 import pandas as pd
@@ -186,14 +187,17 @@ def train_model_ray(config: dict):
     device = 'cpu'
     
     # Load data (assumes data is already prepared)
-    # In practice, you'd load from the scaled CSV files
-    data_path = config.get('data_path', 'sabr_with_derivatives_scaled.csv')
+    # CRITICAL: Ray Tune changes working directory, must use absolute path
+    raw_path = config.get('data_path', 'sabr_with_derivatives_scaled.csv')
+    data_path = os.path.abspath(raw_path)
     
     try:
         df = pd.read_csv(data_path)
-    except:
-        # Fallback to simple data if derivatives not available
-        df = pd.read_csv('sabr_with_derivatives_scaled.csv')
+    except FileNotFoundError:
+        # Try current working directory as fallback
+        df = pd.read_csv(raw_path)
+
+
     
     # Prepare features and targets
     feature_cols = ['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']
@@ -227,8 +231,11 @@ def train_model_ray(config: dict):
     val_loader = DataLoader(val_dataset, batch_size=config['batch_size'])
     
     # Create model
+    # CRITICAL: PyTorch Transformer only accepts 'relu' or 'gelu'
     if config['model_type'] == 'transformer':
-        model = TabularTransformer(
+        # For non-standard activations, force MLP instead
+        if config['activation'] not in ['gelu', 'relu']:
+            model = DeepMLP(
             input_dim=X.shape[1],
             output_dim=output_dim,
             d_model=config['d_model'],
@@ -336,7 +343,7 @@ def train_model_ray(config: dict):
         scheduler.step(val_loss)
         
         # Report to Ray Tune
-        train.report({
+        tune.report({
             'train_loss': train_loss,
             'val_loss': val_loss,
             'val_mae': val_mae,
@@ -371,8 +378,8 @@ def run_ray_tune_search(
     
     # Define search space
     search_space = {
-        # Data
-        'data_path': data_path,
+        # Data - CRITICAL: use absolute path for Ray Tune
+        'data_path': os.path.abspath(data_path),
         
         # Model architecture
         'model_type': tune.choice(['transformer', 'mlp']),

@@ -1,0 +1,24 @@
+{
+  "data_path": "C:\\Users\\khaya\\OneDrive - GENES\\Documents\\GitHub\\TabPFN-Project\\sabr_with_derivatives_scaled.csv",
+  "model_type": "mlp",
+  "activation": "gelu",
+  "d_model": 128,
+  "nhead": 8,
+  "num_layers": 3,
+  "dim_feedforward": 2048,
+  "hidden_dims": [
+    512,
+    256,
+    128,
+    64
+  ],
+  "batch_size": 64,
+  "lr": 0.00407597082471488,
+  "dropout": 0.08243593381485366,
+  "optimizer": "adam",
+  "weight_decay": 8.414641450668655e-06,
+  "use_derivative_loss": true,
+  "value_weight": 1.2281037192911524,
+  "derivative_weight": 0.44761271917446754,
+  "num_epochs": 50
+}
