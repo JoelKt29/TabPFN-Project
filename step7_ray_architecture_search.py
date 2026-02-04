@@ -21,7 +21,7 @@ from ray import tune, train
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.search.optuna import OptunaSearch
 from step6_loss_with_derivatives import create_loss_function
-
+RAY_AVAILABLE = True
 
 # ============================================================================
 # DIFFERENTIABLE ACTIVATION FUNCTIONS 
@@ -183,7 +183,7 @@ def train_model_ray(config: dict):
     """
     
     # Set device
-    device = torch.device('cpu')
+    device = 'cpu'
     
     # Load data (assumes data is already prepared)
     # In practice, you'd load from the scaled CSV files
@@ -193,7 +193,7 @@ def train_model_ray(config: dict):
         df = pd.read_csv(data_path)
     except:
         # Fallback to simple data if derivatives not available
-        df = pd.read_csv('sabr_data_recovery.csv')
+        df = pd.read_csv('sabr_with_derivatives_scaled.csv')
     
     # Prepare features and targets
     feature_cols = ['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']
@@ -350,8 +350,8 @@ def train_model_ray(config: dict):
 
 def run_ray_tune_search(
     data_path: str = 'sabr_with_derivatives_scaled.csv',
-    num_samples: int = 50,
-    max_epochs: int = 50,
+    num_samples: int = 20,
+    max_epochs: int = 30,
     gpus_per_trial: float = 0.0,
     output_dir: str = './ray_results'
 ):
