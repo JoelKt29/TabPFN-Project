@@ -4,6 +4,9 @@ from step2_hagan_2002_lognormal_sabr import Hagan2002LognormalSABR
 from sklearn.preprocessing import MinMaxScaler
 import json
 from tqdm import tqdm 
+from pathlib import Path
+current_dir = Path(__file__).resolve().parent
+data_dir = current_dir.parent / "data"
 
 np.random.seed(42)
 
@@ -84,10 +87,10 @@ scaling_params = {
     'y_max': float(y_max),
     'X_min': {col: float(v) for col, v in zip(X_variable.columns, scaler_X.data_min_)},
     'X_max': {col: float(v) for col, v in zip(X_variable.columns, scaler_X.data_max_)}}
-with open('scaling_params_recovery.json', 'w') as f:
+with open(data_dir / "scaling_params_recovery.json", 'w') as f:
     json.dump(scaling_params, f, indent=4)
 
 # Saving data
-df_final.to_csv('sabr_market_data.csv', index=False)
+df_final.to_csv(data_dir / "sabr_market_data.csv", index=False)
 
 print("\nGenerating OK")

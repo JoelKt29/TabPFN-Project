@@ -6,6 +6,10 @@ import json
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor
 import os
+from pathlib import Path
+
+current_dir = Path(__file__).resolve().parent
+data_dir = current_dir.parent / "data"
 
 def compute_config_samples(args):
     """Calcule les 8 strikes pour une seule config de paramètres"""
@@ -88,8 +92,6 @@ def fast_generate_sabr(num_samples=5000, num_strikes=8):
         ))
 
     final_data = []
-    # Parallélisation sur tous les CPU disponibles
-    print(f"🚀 Lancement du calcul sur {os.cpu_count()} cœurs...")
     with ProcessPoolExecutor() as executor:
         results = list(tqdm(executor.map(compute_config_samples, configs), total=len(configs)))
     
@@ -151,8 +153,7 @@ def scale_data_with_derivatives(df):
 if __name__ == "__main__":
     df = fast_generate_sabr(5000, 8)
     df_scaled, scaling_params = scale_data_with_derivatives(df)
-    df.to_csv('sabr_with_derivatives_raw.csv', index=False)
-    df_scaled.to_csv('sabr_with_derivatives_scaled.csv', index=False)
+    df_scaled.to_csv(data_dir / 'sabr_with_derivatives_scaled.csv', index=False)
     
-    with open('scaling_params_derivatives.json', 'w') as f:
+    with open(data_dir / 'scaling_params_derivatives.json', 'w') as f:
         json.dump(scaling_params, f, indent=2)
