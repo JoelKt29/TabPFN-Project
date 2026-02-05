@@ -8,8 +8,6 @@ Tests automatiques:
 
 import os
 os.environ['RAY_DEDUP_LOGS'] = '0'  # Reduce Ray logging
-data_path = os.path.abspath('sabr_with_derivatives_scaled.csv')
-
 import numpy as np
 import pandas as pd
 import torch
@@ -21,12 +19,26 @@ import ray
 from ray import tune, train
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.search.optuna import OptunaSearch
-from step6_loss_with_derivatives import create_loss_function
-RAY_AVAILABLE = True
 
-# ============================================================================
-# DIFFERENTIABLE ACTIVATION FUNCTIONS 
-# ============================================================================
+from pathlib import Path
+current_dir = Path(__file__).resolve().parent
+data_dir = current_dir.parent / "data"
+import sys
+data_path = os.path.abspath(data_dir / 'sabr_with_derivatives_scaled.csv')
+
+
+# Étape A: On trouve le dossier où se trouve ce script (ex: .../scripts/)
+current_script_path = os.path.abspath(__file__)
+current_dir = os.path.dirname(current_script_path)
+
+# Étape B: On ajoute ce dossier au PATH de Python pour qu'il voie les autres fichiers
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
+
+# Étape C: Import direct (SANS le nom du dossier devant)
+
+from step6_loss_with_derivatives import create_loss_function
+
 
 class Swish(nn.Module):
     def forward(self, x):
@@ -48,26 +60,22 @@ def get_activation(name: str) -> nn.Module:
     return activations[name.lower()]
 
 
-# ============================================================================
-# MODEL ARCHITECTURE
-# ============================================================================
 
 class TabularTransformer(nn.Module):
     """
-    Transformer-based model for tabular data
-    Inspired by TabPFN architecture but trainable
+    Inspired by TabPFN architecture
     """
     
     def __init__(
         self,
-        input_dim: int,
-        output_dim: int = 1,
-        d_model: int = 256,
-        nhead: int = 8,
-        num_layers: int = 4,
-        dim_feedforward: int = 1024,
-        dropout: float = 0.1,
-        activation: str = 'gelu'
+        input_dim: int=8,
+        output_dim: int = 7,           
+        d_model: int = 192,            
+        nhead: int = 4,                
+        num_layers: int = 12,           
+        dim_feedforward: int = 768,   
+        dropout: float = 0.0,          
+        activation: str = 'gelu'       
     ):
         super().__init__()
         
@@ -142,7 +150,8 @@ class DeepMLP(nn.Module):
         output_dim: int = 1,
         hidden_dims: list = [512, 256, 128],
         dropout: float = 0.1,
-        activation: str = 'gelu'
+        activation: str = 'gelu',
+        d_model : int = 0
     ):
         super().__init__()
         
@@ -188,7 +197,7 @@ def train_model_ray(config: dict):
     
     # Load data (assumes data is already prepared)
     # CRITICAL: Ray Tune changes working directory, must use absolute path
-    raw_path = config.get('data_path', 'sabr_with_derivatives_scaled.csv')
+    raw_path = config.get('data_path',data_dir / 'sabr_with_derivatives_scaled.csv')
     data_path = os.path.abspath(raw_path)
     
     try:
@@ -230,30 +239,41 @@ def train_model_ray(config: dict):
     train_loader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=config['batch_size'])
     
-    # Create model
-    # CRITICAL: PyTorch Transformer only accepts 'relu' or 'gelu'
-    if config['model_type'] == 'transformer':
-        # For non-standard activations, force MLP instead
-        if config['activation'] not in ['gelu', 'relu']:
+    # --- BLOC DE CRÉATION DU MODÈLE CORRIGÉ ---
+    model = None
+    
+    if config["model_type"] == "transformer":
+        # PyTorch Transformer only accepts relu/gelu - force MLP for others
+        if config["activation"] not in ["gelu", "relu"]:
             model = DeepMLP(
-            input_dim=X.shape[1],
-            output_dim=output_dim,
-            d_model=config['d_model'],
-            nhead=config['nhead'],
-            num_layers=config['num_layers'],
-            dim_feedforward=config['dim_feedforward'],
-            dropout=config['dropout'],
-            activation=config['activation']
-        )
-    else:  # MLP
+                input_dim=X.shape[1],
+                output_dim=output_dim,
+                hidden_dims=config["hidden_dims"],
+                dropout=config.get("dropout", 0.1),
+                activation=config["activation"]
+            )
+        else:
+            model = TabularTransformer(
+                input_dim=X.shape[1],
+                output_dim=output_dim,
+                d_model=config["d_model"],
+                nhead=config["nhead"],
+                num_layers=config["num_layers"],
+                dim_feedforward=config["dim_feedforward"],
+                dropout=config.get("dropout", 0.1),
+                activation=config["activation"]
+            )
+    elif config["model_type"] == "mlp":
+        # Le MLP utilise hidden_dims. On ignore d_model et nhead ici.
         model = DeepMLP(
             input_dim=X.shape[1],
             output_dim=output_dim,
-            hidden_dims=config['hidden_dims'],
-            dropout=config['dropout'],
-            activation=config['activation']
+            hidden_dims=config["hidden_dims"],
+            dropout=config.get("dropout", 0.1),
+            activation=config["activation"]
         )
-    
+    if model is None:
+        raise ValueError(f"Échec critique : Modèle non créé pour le type {config['model_type']}")
     model = model.to(device)
     
     # Loss function
@@ -356,9 +376,9 @@ def train_model_ray(config: dict):
 # ============================================================================
 
 def run_ray_tune_search(
-    data_path: str = 'sabr_with_derivatives_scaled.csv',
-    num_samples: int = 20,
-    max_epochs: int = 30,
+    data_path: str = data_dir / 'sabr_with_derivatives_scaled.csv',
+    num_samples: int = 100,
+    max_epochs: int = 50,
     gpus_per_trial: float = 0.0,
     output_dir: str = './ray_results'
 ):
@@ -373,8 +393,6 @@ def run_ray_tune_search(
         output_dir: Where to save results
     """
     
-    if not RAY_AVAILABLE:
-        raise ImportError("Ray Tune not available. Install with: pip install 'ray[tune]' optuna")
     
     # Define search space
     search_space = {
@@ -392,12 +410,7 @@ def run_ray_tune_search(
         'dim_feedforward': tune.choice([512, 1024, 2048]),
         
         # MLP-specific
-        'hidden_dims': tune.choice([
-            [256, 128, 64],
-            [512, 256, 128],
-            [512, 256, 128, 64],
-            [1024, 512, 256],
-        ]),
+        'hidden_dims': tune.choice([(512, 256, 128), (256, 128, 64)]),
         
         # Training
         'batch_size': tune.choice([32, 64, 128]),
@@ -407,7 +420,7 @@ def run_ray_tune_search(
         'weight_decay': tune.loguniform(1e-6, 1e-3),
         
         # Loss
-        'use_derivative_loss': tune.choice([True, False]),
+        'use_derivative_loss':True,
         'value_weight': tune.uniform(0.5, 1.5),
         'derivative_weight': tune.uniform(0.1, 1.0),
         
@@ -421,7 +434,7 @@ def run_ray_tune_search(
         metric='val_mae',
         mode='min',
         max_t=max_epochs,
-        grace_period=10,
+        grace_period=20,
         reduction_factor=2,
     )
     
@@ -489,22 +502,19 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description='Ray Tune architecture search for SABR TabPFN')
-    parser.add_argument('--data', type=str, default='sabr_with_derivatives_scaled.csv',
+    parser.add_argument('--data', type=str, default=data_dir / 'sabr_with_derivatives_scaled.csv',
                         help='Path to data CSV')
-    parser.add_argument('--samples', type=int, default=50,
+    parser.add_argument('--samples', type=int, default=100,
                         help='Number of configurations to try')
     parser.add_argument('--epochs', type=int, default=50,
                         help='Max epochs per trial')
-    parser.add_argument('--gpus', type=float, default=1,
+    parser.add_argument('--gpus', type=float, default=0,
                         help='GPU fraction per trial (0 for CPU only)')
     parser.add_argument('--output', type=str, default='./ray_results',
                         help='Output directory')
     
     args = parser.parse_args()
     
-    print("\n🚀 RAY TUNE SEARCH - Testing ALL Differentiable Activations")
-    print("Following Peter's instruction: 'Use only differentiable activation functions'")
-    print("Activations to test: Swish, Mish, GELU, SELU\n")
     
     # Run search
     results, best_result = run_ray_tune_search(
@@ -515,5 +525,4 @@ if __name__ == "__main__":
         output_dir=args.output
     )
     
-    print("\n✅ Ray Tune search completed successfully!")
-    print("Next step: Use best_config.json to fine-tune TabPFN")
+    print("\n Ray Tune search completed")

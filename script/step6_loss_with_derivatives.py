@@ -23,45 +23,22 @@ class DerivativeLoss(nn.Module):
         self.derivative_weight = derivative_weight
         self.derivative_weights = derivative_weights or {}
     
-    def forward(
-        self,
-        pred_vol: torch.Tensor,
-        true_vol: torch.Tensor,
-        pred_derivs: Optional[Dict[str, torch.Tensor]] = None,
-        true_derivs: Optional[Dict[str, torch.Tensor]] = None
-    ) -> Tuple[torch.Tensor, Dict[str, float]]:
-        """
-        Compute combined loss
+    def forward(self, pred_vol, true_vol,pred_derivs: Optional[Dict[str, torch.Tensor]] = None,
+        true_derivs: Optional[Dict[str, torch.Tensor]] = None) :
         
-        Args:
-            pred_vol: Predicted volatilities [batch_size, 1]
-            true_vol: True volatilities [batch_size, 1]
-            pred_derivs: Dict of predicted derivatives
-            true_derivs: Dict of true derivatives
-            
-        Returns:
-            total_loss, loss_breakdown
-        """
-        
-        # Volatility loss (L1/MAE)
+        #Volatility weighted loss
         vol_loss = torch.mean(torch.abs(pred_vol - true_vol))
-        total_loss = self.value_weight * vol_loss
-        
-        loss_breakdown = {
-            'volatility_loss': vol_loss.item(),
-        }
+        total_loss =  vol_loss*self.value_weight
+        loss_breakdown = {'volatility_loss': vol_loss.item(),}
         
         # Derivative losses
         if pred_derivs is not None and true_derivs is not None:
             deriv_loss_total = 0.0
             num_derivs = 0
-            
             for deriv_name in pred_derivs.keys():
                 if deriv_name in true_derivs:
                     pred_d = pred_derivs[deriv_name]
                     true_d = true_derivs[deriv_name]
-                    
-                    # Individual derivative loss
                     deriv_loss = torch.mean(torch.abs(pred_d - true_d))
                     
                     # Apply individual weight if specified
@@ -105,8 +82,8 @@ class AdaptiveDerivativeLoss(nn.Module):
     
     def forward(
         self,
-        pred_vol: torch.Tensor,
-        true_vol: torch.Tensor,
+        pred_vol,
+        true_vol,
         pred_derivs: Optional[Dict[str, torch.Tensor]] = None,
         true_derivs: Optional[Dict[str, torch.Tensor]] = None
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
