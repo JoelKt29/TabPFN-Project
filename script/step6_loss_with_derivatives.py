@@ -136,56 +136,6 @@ class AdaptiveDerivativeLoss(nn.Module):
         return total_loss, loss_breakdown
 
 
-class HuberDerivativeLoss(nn.Module):
-    """
-    Huber loss (robust to outliers) for volatility + derivatives
-    Good for financial data which may have outliers
-    """
-    
-    def __init__(
-        self,
-        value_weight: float = 1.0,
-        derivative_weight: float = 0.5,
-        delta: float = 1.0
-    ):
-        super().__init__()
-        self.value_weight = value_weight
-        self.derivative_weight = derivative_weight
-        self.huber = nn.HuberLoss(delta=delta)
-    
-    def forward(
-        self,
-        pred_vol: torch.Tensor,
-        true_vol: torch.Tensor,
-        pred_derivs: Optional[Dict[str, torch.Tensor]] = None,
-        true_derivs: Optional[Dict[str, torch.Tensor]] = None
-    ) -> Tuple[torch.Tensor, Dict[str, float]]:
-        
-        # Volatility Huber loss
-        vol_loss = self.huber(pred_vol, true_vol)
-        total_loss = self.value_weight * vol_loss
-        
-        loss_breakdown = {'volatility_loss': vol_loss.item()}
-        
-        # Derivative Huber losses
-        if pred_derivs is not None and true_derivs is not None:
-            deriv_loss_total = 0.0
-            
-            for deriv_name in pred_derivs.keys():
-                if deriv_name in true_derivs:
-                    deriv_loss = self.huber(pred_derivs[deriv_name], true_derivs[deriv_name])
-                    deriv_loss_total += deriv_loss
-                    loss_breakdown[f'{deriv_name}_loss'] = deriv_loss.item()
-            
-            avg_deriv_loss = deriv_loss_total / len(pred_derivs)
-            total_loss += self.derivative_weight * avg_deriv_loss
-            loss_breakdown['avg_derivative_loss'] = avg_deriv_loss.item()
-        
-        loss_breakdown['total_loss'] = total_loss.item()
-        
-        return total_loss, loss_breakdown
-
-
 class GradientMatchingLoss(nn.Module):
     """
     Alternative: Match gradients using automatic differentiation
@@ -260,7 +210,7 @@ def create_loss_function(loss_type: str = 'derivative', **kwargs) -> nn.Module:
     Factory function to create loss functions
     
     Args:
-        loss_type: 'derivative', 'adaptive', 'huber', or 'gradient_matching'
+        loss_type: 'derivative', 'adaptive', or 'gradient_matching'
         **kwargs: Additional arguments for the loss function
         
     Returns:
@@ -270,7 +220,6 @@ def create_loss_function(loss_type: str = 'derivative', **kwargs) -> nn.Module:
     loss_functions = {
         'derivative': DerivativeLoss,
         'adaptive': AdaptiveDerivativeLoss,
-        'huber': HuberDerivativeLoss,
         'gradient_matching': GradientMatchingLoss,
     }
     
@@ -317,9 +266,3 @@ if __name__ == "__main__":
     loss, breakdown = loss_fn(pred_vol, true_vol, pred_derivs, true_derivs)
     print(f"   Total loss: {loss.item():.6f}")
     
-    print("\n3. HuberDerivativeLoss:")
-    loss_fn = HuberDerivativeLoss(value_weight=1.0, derivative_weight=0.5, delta=0.1)
-    loss, breakdown = loss_fn(pred_vol, true_vol, pred_derivs, true_derivs)
-    print(f"   Total loss: {loss.item():.6f}")
-    
-   

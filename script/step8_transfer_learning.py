@@ -1,108 +1,147 @@
-import os
-import json
+from pathlib import Path
 import torch
 import torch.nn as nn
 import pandas as pd
-from pathlib import Path
-from torch.utils.data import DataLoader, TensorDataset
-# On utilise le Regressor officiel pour la v2
-from tabpfn import TabPFNRegressor 
+import json
+import numpy as np
+import os
+from tabpfn import TabPFNRegressor
 
-# 1. Configuration
+# Gestion des chemins
 current_dir = Path(__file__).resolve().parent
-from step6_loss_with_derivatives import create_loss_function
+data_dir = current_dir.parent / "data"
 
-with open(current_dir / "ray_results" / "best_config.json", "r") as f:
-    best_config = json.load(f)
+try:
+    from step6_loss_with_derivatives import create_loss_function
+except ImportError:
+    print("❌ Erreur : Impossible de trouver step6_loss_with_derivatives.py")
 
-# 2. Le Modèle : On hérite de TabPFNRegressor
-# Au lieu de hacker l'interne, on encapsule le Regressor
-class TabPFNSABRModel(nn.Module):
-    def __init__(self, n_out=7):
+# ==========================================
+# 1. ARCHITECTURE TABPFN + INTERCEPTION
+# ==========================================
+class TabPFNSABRRegressor(nn.Module):
+    def __init__(self, config, n_outputs=7):
         super().__init__()
-        # On initialise le regressor v2
-        self.regressor = TabPFNRegressor(device='cpu')
         
-        # Peter veut une modification d'architecture : 
-        # On définit notre tête MLP validée en Step 7
-        # On récupère la dimension d'entrée (8) et on mappe vers n_out
-        self.head = nn.Sequential(
-            nn.Linear(8, 512),
-            nn.GELU(),
-            nn.Linear(512, 256),
-            nn.GELU(),
-            nn.Linear(256, n_out)
-        )
+        print("🔄 Chargement de TabPFN...")
+        self.tabpfn = TabPFNRegressor(device='cpu')
+        # Initialisation du modèle interne
+        self.tabpfn.fit(np.random.randn(5, 8), np.random.randn(5))
+        
+        # On récupère le modèle PyTorch sous-jacent
+        self.inner_model = self.tabpfn.model_ if hasattr(self.tabpfn, 'model_') else self.tabpfn.model
+        
+        # On gèle tout le modèle
+        for param in self.inner_model.parameters():
+            param.requires_grad = False
+            
+        # --- LE HACK DU HOOK ---
+        # On va stocker les caractéristiques ici à chaque passage
+        self.captured_features = None
+        
+        def hook_fn(module, input, output):
+            # L'output du transformer est souvent [Seq, Batch, 512]
+            # On capture et on enlève la dimension de séquence
+            self.captured_features = output[0] if output.dim() == 3 else output
+
+        # On attache le hook à la fin du transformer (juste avant la couche de sortie)
+        # Dans TabPFN, c'est généralement le bloc 2 ou le dernier bloc du Sequential
+        self.inner_model[2].register_forward_hook(hook_fn)
+
+        # --- TÊTE DE MODÈLE (TRANSFORMER HEAD) ---
+        d_model = 512 
+        layers = []
+        prev_dim = d_model
+        
+        hidden_dims = config.get('hidden_dims', [512, 256, 128])
+        for h_dim in hidden_dims:
+            layers.extend([
+                nn.Linear(prev_dim, h_dim),
+                nn.SiLU(), # Swish
+                nn.Dropout(config.get('dropout', 0.09))
+            ])
+            prev_dim = h_dim
+        
+        layers.append(nn.Linear(prev_dim, n_outputs))
+        self.head = nn.Sequential(*layers)
 
     def forward(self, x):
-        # Utilisation de TabPFN pour obtenir des prédictions de base (In-Context)
-        # Puis raffinement par notre tête spécialisée SABR
-        return self.head(x)
-
-# 3. Préparation des données
-df = pd.read_csv(best_config['data_path'])
-feature_cols = ['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']
-deriv_cols = [c for c in df.columns if c.startswith('dV_') and c.endswith('_scaled')]
-y_cols = ['volatility_scaled'] + deriv_cols
-
-X = torch.FloatTensor(df[feature_cols].values)
-y = torch.FloatTensor(df[y_cols].values)
-
-# Suppression du BatchNorm problématique en faveur d'un LayerNorm ou simple Linear
-# On s'assure que le batch_size est suffisant
-loader = DataLoader(TensorDataset(X, y), batch_size=best_config['batch_size'], shuffle=True, drop_last=True)
-
-# 4. Entraînement avec Sobolev Loss
-model = TabPFNSABRModel(n_out=len(y_cols))
-criterion = create_loss_function(
-    loss_type='derivative',
-    value_weight=best_config['value_weight'],
-    derivative_weight=best_config['derivative_weight']
-)
-
-optimizer = torch.optim.AdamW(model.parameters(), lr=best_config['lr'])
-
-print("✨ Fine-tuning TabPFN Regressor avec Sobolev Loss...")
-model.train()
-for epoch in range(10):
-    for b_X, b_y in loader:
-        optimizer.zero_grad()
-        out = model(b_X)
+        # 1. On utilise le passage standard de TabPFN
+        # Cela gère toute la plomberie interne (masques, séquences) pour nous
+        with torch.no_grad():
+            # On passe x. La sortie 'preds' ne nous intéresse pas, 
+            # c'est le hook qui va remplir 'self.captured_features'
+            _ = self.tabpfn.predict(x.cpu().numpy())
+            
+        # 2. On récupère les 512 caractéristiques interceptées
+        features = torch.FloatTensor(self.captured_features).to(x.device)
         
-        # Sobolev Loss
-        loss, _ = criterion(out[:, 0:1], b_y[:, 0:1], 
-                           {f'd{i}': out[:, i:i+1] for i in range(1, out.size(1))},
-                           {f'd{i}': b_y[:, i:i+1] for i in range(1, b_y.size(1))})
-        loss.backward()
-        optimizer.step()
+        # 3. On passe dans ta tête optimisée
+        return self.head(features)
 
-import matplotlib.pyplot as plt
+# ==========================================
+# 2. LOGIQUE D'ENTRAÎNEMENT
+# ==========================================
+def run_step8():
+    config_path = current_dir / "ray_results" / "best_config.json"
+    if not config_path.exists():
+        config = {"hidden_dims": [512, 256, 128], "lr": 0.0016, "dropout": 0.09, 
+                  "batch_size": 128, "value_weight": 0.5, "derivative_weight": 0.1}
+    else:
+        with open(config_path, "r") as f:
+            config = json.load(f)
 
-def plot_smile_comparison(model, df):
-    model.eval()
-    # 1. On prend un échantillon (ex: une seule nappe de volatilité)
-    # On fixe les paramètres SABR et on fait varier le Strike (K)
-    sample_mask = (df['alpha'] == df['alpha'].iloc[0]) & (df['rho'] == df['rho'].iloc[0])
-    test_df = df[sample_mask].sort_values('log_moneyness')
+    df = pd.read_csv(data_dir / "sabr_with_derivatives_scaled.csv")
+    feature_cols = ['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']
+    target_cols = ['volatility_scaled', 'dV_dbeta_scaled', 'dV_drho_scaled', 
+                   'dV_dvolvol_scaled', 'dV_dvatm_scaled', 'dV_dF_scaled', 'dV_dK_scaled']
     
-    X_test = torch.FloatTensor(test_df[feature_cols].values)
-    y_true = test_df['volatility_scaled'].values
-    
-    with torch.no_grad():
-        y_pred = model(X_test)[:, 0].numpy() # On prend la 1ère colonne (Vol)
+    X = torch.FloatTensor(df[feature_cols].values)
+    y = torch.FloatTensor(df[target_cols].values)
 
-    # 2. Création du graphique
-    plt.figure(figsize=(10, 6))
-    plt.plot(test_df['log_moneyness'], y_true, 'k--', label='SABR Théorique (Cible)', alpha=0.6)
-    plt.plot(test_df['log_moneyness'], y_pred, 'r-', label='TabPFN-SABR (Prédiction)', linewidth=2)
-    
-    plt.title(f"Comparaison du Smile de Volatilité - Step 8")
-    plt.xlabel("Log-Moneyness (log(K/F))")
-    plt.ylabel("Volatilité Impliquée (Scaled)")
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.savefig("smile_comparison_step8.png")
-    plt.show()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = TabPFNSABRRegressor(config, n_outputs=len(target_cols)).to(device)
 
-# Appel de la fonction à la fin du script
-plot_smile_comparison(model, df)
+    criterion = create_loss_function(
+        loss_type='derivative',
+        value_weight=config.get('value_weight', 0.5),
+        derivative_weight=config.get('derivative_weight', 0.1)
+    )
+    
+    optimizer = torch.optim.AdamW(model.head.parameters(), lr=config.get('lr', 0.0016))
+
+    print("\n" + "="*50)
+    print("✨ STEP 8 : TRAINING HYBRID (HOOK INTERCEPTION)")
+    print(f"Objectif : Battre MAE {config.get('best_mae', 0.0055)}")
+    print("="*50)
+
+    model.train()
+    batch_size = config.get('batch_size', 128)
+    
+    for epoch in range(51):
+        permutation = torch.randperm(X.size(0))
+        epoch_loss = 0
+        
+        for i in range(0, X.size(0), batch_size):
+            indices = permutation[i:i+batch_size]
+            batch_x, batch_y = X[indices].to(device), y[indices].to(device)
+
+            optimizer.zero_grad()
+            out = model(batch_x)
+            
+            loss, _ = criterion(out[:, 0:1], batch_y[:, 0:1], 
+                               {f'd{j}': out[:, j:j+1] for j in range(1, 7)},
+                               {f'd{j}': batch_y[:, j:j+1] for j in range(1, 7)})
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+            
+        if epoch % 10 == 0:
+            current_mae = torch.mean(torch.abs(out[:, 0:1] - batch_y[:, 0:1])).item()
+            print(f"Époque {epoch:02d} | Loss: {epoch_loss/(X.size(0)/batch_size):.6f} | MAE: {current_mae:.6f}")
+
+    torch.save(model.state_dict(), current_dir / "tabpfn_sabr_step8_hybrid.pth")
+    print("\n✅ Modèle sauvegardé.")
+
+if __name__ == "__main__":
+    run_step8()

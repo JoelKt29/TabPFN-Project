@@ -431,7 +431,7 @@ def run_ray_tune_search(
     # ASHA scheduler for early stopping bad trials
     scheduler = ASHAScheduler(
         time_attr='epoch',
-        metric='val_mae',
+        metric='val_loss',
         mode='min',
         max_t=max_epochs,
         grace_period=20,
@@ -440,7 +440,7 @@ def run_ray_tune_search(
     
     # Optuna search algorithm (smarter than random)
     search_alg = OptunaSearch(
-        metric='val_mae',
+        metric='val_loss',
         mode='min',
     )
     
@@ -474,7 +474,7 @@ def run_ray_tune_search(
     results = tuner.fit()
     
     # Get best result
-    best_result = results.get_best_result(metric="val_mae", mode="min")
+    best_result = results.get_best_result(metric="val_loss", mode="min")
     
     print("\n" + "="*80)
     print("BEST CONFIGURATION FOUND")
@@ -489,6 +489,9 @@ def run_ray_tune_search(
     best_config_path = Path(output_dir) / 'best_config.json'
     best_config_path.parent.mkdir(parents=True, exist_ok=True)
     
+    best_config_to_save = best_result.config.copy()
+    best_config_to_save['best_mae'] = float(best_result.metrics['val_mae'])
+
     with open(best_config_path, 'w') as f:
         json.dump(best_result.config, f, indent=2)
     
