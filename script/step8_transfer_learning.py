@@ -6,18 +6,12 @@ import json
 import numpy as np
 from tabpfn import TabPFNRegressor
 
-# ==========================================
-# 0. GESTION DES CHEMINS (PRÉCIS)
-# ==========================================
+
 current_dir = Path(__file__).resolve().parent
 data_dir = current_dir.parent / "data"
-# Chemin exact que tu m'as donné : script/ray_results/
 config_path = current_dir / "ray_results" / "best_config.json"
 
-try:
-    from step6_loss_with_derivatives import create_loss_function
-except ImportError:
-    print("❌ Erreur : step6_loss_with_derivatives.py introuvable dans le dossier script.")
+from step6_loss_with_derivatives import create_loss_function
 
 # ==========================================
 # 1. ARCHITECTURE HYBRIDE (STACKING)

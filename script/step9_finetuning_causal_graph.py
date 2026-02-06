@@ -1,172 +1,141 @@
+from pathlib import Path
 import torch
 import torch.nn as nn
+import pandas as pd
 import json
 import numpy as np
-import matplotlib.pyplot as plt
-from pathlib import Path
-from tabpfn import TabPFNClassifier
+from tabpfn import TabPFNRegressor
+
+# --- GESTION DES CHEMINS ---
+current_dir = Path(__file__).resolve().parent
+data_dir = current_dir.parent / "data"
+config_path = current_dir / "ray_results" / "best_config.json"
+
+try:
+    from step6_loss_with_derivatives import create_loss_function
+except ImportError:
+    print("❌ Erreur : step6_loss_with_derivatives.py introuvable.")
 
 # ==========================================
-# 1. LA STRUCTURE DU MODÈLE (Intégrée)
+# 1. ARCHITECTURE STEP 9 (CAUSAL ADAPTATION)
 # ==========================================
-class TabPFNSABRRegressor(nn.Module):
-    """Modèle hybride : Encodeur TabPFN + Tête MLP spécialisée SABR."""
-    def __init__(self, n_out=7, hidden_dims=[512, 256, 128]):
+class TabPFNCausalModel(nn.Module):
+    def __init__(self, config, n_outputs=7):
         super().__init__()
-        # Initialisation du moteur TabPFN
-        base_model = TabPFNClassifier(device='cpu')
-        # Dummy fit pour forcer le chargement des poids internes (model_)
-        base_model.fit(np.random.randn(5, 8), np.random.randint(0, 2, 5))
+        print("🔄 Initialisation de TabPFN pour Fine-tuning Causal...")
+        reg = TabPFNRegressor(device='cpu')
+        reg.fit(np.random.randn(5, 8), np.random.randn(5))
         
-        # Accès sécurisé à l'encodeur Transformer
-        if hasattr(base_model, 'model_'):
-            full_model = base_model.model_
-        else:
-            full_model = base_model.model
+        self.backbone = reg.model_ if hasattr(reg, 'model_') else reg.model
+        
+        # --- DÉGEL TOTAL (UNFREEZING) ---
+        for param in self.backbone.parameters():
+            param.requires_grad = True
             
-        self.encoder = full_model[2] # Le Transformer est le 3ème bloc
-        self.d_model = getattr(self.encoder, 'emsize', 512)
-        
-        # Construction de la tête MLP (basée sur ton optimisation Step 7)
+        input_dim = 512 # Sortie directe du Transformer
         layers = []
-        prev_dim = self.d_model
-        for h_dim in hidden_dims:
+        prev_dim = input_dim
+        h_dims = config.get('hidden_dims', [512, 256, 128])
+        
+        for h_dim in h_dims:
             layers.extend([
                 nn.Linear(prev_dim, h_dim),
-                nn.SiLU(), # Activation Swish
-                nn.BatchNorm1d(h_dim)
+                nn.SiLU(), # Swish
+                nn.Dropout(config.get('dropout', 0.05))
             ])
             prev_dim = h_dim
-        layers.append(nn.Linear(prev_dim, n_out))
-        self.custom_head = nn.Sequential(*layers)
+        
+        layers.append(nn.Linear(prev_dim, n_outputs))
+        self.head = nn.Sequential(*layers)
 
     def forward(self, x):
-        # Format [Seq=1, Batch, Feats]
+        # Trick de la séquence double (Size 2) pour éviter l'erreur de TabPFN
         x_in = x.unsqueeze(0)
-        dummy_y = torch.zeros(1, x.size(0), 1).to(x.device)
+        x_combined = torch.cat([x_in, x_in], dim=0) 
+        y_combined = torch.zeros(2, x.size(0), 1).to(x.device)
         
-        # Extraction des features (on garde les gradients pour le fine-tuning)
-        features = self.encoder(x_in, dummy_y)
-        return self.custom_head(features.squeeze(0))
-
-# ==========================================
-# 2. LE GÉNÉRATEUR CAUSAL (Simulation SABR)
-# ==========================================
-class SABRCausalGenerator:
-    """Moteur physique générant des relations causes -> effets."""
-    def __init__(self, beta=0.5):
-        self.beta = beta
-
-    def generate(self, batch_size=32):
-        # Échantillonnage des paramètres (Causes)
-        alpha = np.random.uniform(0.1, 0.4, (batch_size, 1))
-        rho = np.random.uniform(-0.8, -0.2, (batch_size, 1))
-        volvol = np.random.uniform(0.2, 0.6, (batch_size, 1))
-        F = np.random.uniform(95, 105, (batch_size, 1))
-        K = np.random.uniform(85, 115, (batch_size, 1))
-        T = np.random.uniform(0.1, 1.5, (batch_size, 1))
-        v_atm_n = alpha * (F ** (self.beta - 1))
-        log_moneyness = np.log(K / F)
-
-        # Calcul de la Volatilité (Effet) - Formule Hagan simplifiée
-        vol = alpha * (1 + (volvol**2 * (2-3*rho**2)/24) * T)
+        # Passage dans le backbone unfrozen
+        all_features = self.backbone(x_combined, y_combined)
         
-        # Dérivées (Greeks) pour la Sobolev Loss
-        dV_dalpha = np.ones_like(vol) * 1.1
-        dV_drho = np.ones_like(vol) * 0.4
-        dV_dvolvol = np.ones_like(vol) * 0.7
-        dV_dF = (vol / F) * -0.05
-        dV_dK = (vol / K) * 0.05
-        dV_dT = np.ones_like(vol) * 0.02
-
-        X = np.hstack([np.full((batch_size, 1), self.beta), rho, volvol, v_atm_n, alpha, F, K, log_moneyness])
-        y = np.hstack([vol, dV_dalpha, dV_drho, dV_dvolvol, dV_dF, dV_dK, dV_dT])
-        
-        return torch.FloatTensor(X), torch.FloatTensor(y)
+        if isinstance(all_features, (list, tuple)):
+            all_features = all_features[0]
+            
+        # Extraction du test (index 1)
+        features = all_features[1, :, :]
+            
+        return self.head(features)
 
 # ==========================================
-# 3. EXÉCUTION DU FINE-TUNING CAUSAL
+# 2. LOGIQUE DE FINE-TUNING
 # ==========================================
-def main():
-    # Chargement config Step 7
-    try:
-        with open("ray_results/best_config.json", "r") as f:
+def run_step9():
+    # A. Chargement de la config
+    if config_path.exists():
+        with open(config_path, "r") as f:
             config = json.load(f)
-    except FileNotFoundError:
-        print("⚠️ Config Step 7 manquante, utilisation des paramètres par défaut.")
-        config = {'hidden_dims': [512, 256, 128], 'lr': 0.001, 'value_weight': 1.0, 'derivative_weight': 0.1, 'batch_size': 32}
+        print(f"📂 Config Step 7 chargée : {config_path}")
+    else:
+        config = {"hidden_dims": [512, 256, 128], "lr": 0.0001, "value_weight": 0.5, "derivative_weight": 0.1}
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = TabPFNSABRRegressor(hidden_dims=config['hidden_dims']).to(device)
+    model = TabPFNCausalModel(config).to(device)
+    
+    # B. Préparation des données
+    csv_path = data_dir / "sabr_with_derivatives_scaled.csv"
+    df = pd.read_csv(csv_path)
+    feature_cols = ['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']
+    target_cols = ['volatility_scaled', 'dV_dbeta_scaled', 'dV_drho_scaled', 
+                   'dV_dvolvol_scaled', 'dV_dvatm_scaled', 'dV_dF_scaled', 'dV_dK_scaled']
+    
+    X = torch.FloatTensor(df[feature_cols].values)
+    Y = torch.FloatTensor(df[target_cols].values)
 
-    # Chargement des poids Step 8
-    try:
-        model.load_state_dict(torch.load("tabpfn_sabr_final.pth", map_location=device))
-        print("✅ Poids de la Step 8 chargés.")
-    except:
-        print("ℹ️ tabpfn_sabr_final.pth non trouvé, initialisation à zéro.")
-
-    # ON LIBÈRE LES GRADIENTS POUR LE VRAI FINE-TUNING
-    for param in model.parameters():
-        param.requires_grad = True
-
-    generator = SABRCausalGenerator()
-    from step6_loss_with_derivatives import create_loss_function
     criterion = create_loss_function(
-        loss_type='derivative', 
-        value_weight=config['value_weight'], 
-        derivative_weight=config['derivative_weight']
+        loss_type='derivative',
+        value_weight=config.get('value_weight', 0.5),
+        derivative_weight=config.get('derivative_weight', 0.1)
     )
-
-    # Optimiseur : Le Transformer apprend 10x moins vite que la tête MLP
+    
+    # Optimizer avec LR différentiel pour protéger TabPFN
     optimizer = torch.optim.AdamW([
-        {'params': model.encoder.parameters(), 'lr': config['lr'] * 0.1},
-        {'params': model.custom_head.parameters(), 'lr': config['lr']}
+        {'params': model.backbone.parameters(), 'lr': 1e-6}, 
+        {'params': model.head.parameters(), 'lr': config.get('lr', 1e-4)}
     ])
 
-    print("🧠 Fine-tuning Causal en cours...")
+    print("\n" + "="*50)
+    print("🚀 STEP 9 : CAUSAL FINE-TUNING (START)")
+    print("="*50)
+
     model.train()
-    for step in range(401):
-        X_batch, y_batch = generator.generate(batch_size=config['batch_size'])
-        X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-
-        optimizer.zero_grad()
-        out = model(X_batch)
-        
-        # Sobolev Loss
-        loss, _ = criterion(out[:, 0:1], y_batch[:, 0:1], 
-                           {f'd{i}': out[:, i:i+1] for i in range(1, 7)},
-                           {f'd{i}': y_batch[:, i:i+1] for i in range(1, 7)})
-        loss.backward()
-        optimizer.step()
-
-        if step % 50 == 0:
-            print(f"Step {step}/400 | Loss: {loss.item():.6f}")
-
-    # ==========================================
-    # 4. GRAPHIQUE COMPARATIF FINAL
-    # ==========================================
-    model.eval()
-    X_test, y_true = generator.generate(batch_size=200)
-    idx = X_test[:, -1].argsort() # Tri par log-moneyness
-    X_test, y_true = X_test[idx], y_true[idx]
+    batch_size = 16 
     
-    with torch.no_grad():
-        y_pred = model(X_test.to(device)).cpu()
+    for epoch in range(21):
+        permutation = torch.randperm(X.size(0))
+        epoch_loss = 0
+        
+        for i in range(0, X.size(0), batch_size):
+            indices = permutation[i:i+batch_size]
+            if len(indices) < 2: continue
+            bx, by = X[indices].to(device), Y[indices].to(device)
 
-    plt.figure(figsize=(10, 6))
-    plt.plot(X_test[:, -1], y_true[:, 0], 'k--', label='Théorie (Causal Generator)', alpha=0.7)
-    plt.plot(X_test[:, -1], y_pred[:, 0], 'r-', label='Ton Modèle Causal (Step 9)', linewidth=2)
-    plt.title("Duel de Performance : Théorie vs Ton IA Causal")
-    plt.xlabel("Log-Moneyness (K/F)")
-    plt.ylabel("Volatilité")
-    plt.legend()
-    plt.grid(True, linestyle=':', alpha=0.6)
-    plt.savefig("performance_duel_step9.png")
-    plt.show()
+            optimizer.zero_grad()
+            out = model(bx)
+            
+            loss, _ = criterion(out[:, 0:1], by[:, 0:1], 
+                               {f'd{j}': out[:, j:j+1] for j in range(1, 7)},
+                               {f'd{j}': by[:, j:j+1] for j in range(1, 7)})
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+            
+        if epoch % 5 == 0:
+            current_mae = torch.mean(torch.abs(out[:, 0] - by[:, 0])).item()
+            print(f"Époque {epoch:02d} | Loss: {epoch_loss/(X.size(0)/batch_size):.6f} | MAE: {current_mae:.6f}")
 
-    torch.save(model.state_dict(), "tabpfn_sabr_causal_final.pth")
-    print("✅ Modèle final sauvegardé : tabpfn_sabr_causal_final.pth")
+    # SAUVEGARDE
+    final_path = current_dir / "tabpfn_sabr_step9_causal_final.pth"
+    torch.save(model.state_dict(), final_path)
+    print(f"\n✅ Terminé ! Modèle expert sauvegardé : {final_path.name}")
 
 if __name__ == "__main__":
-    main()
+    run_step9()
