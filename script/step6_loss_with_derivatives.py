@@ -1,268 +1,68 @@
 import torch
 import torch.nn as nn
-import numpy as np
 from typing import Dict, Optional, Tuple
 
-
 class DerivativeLoss(nn.Module):
-        
-    def __init__(
-        self,
-        value_weight: float = 1.0,
-        derivative_weight: float = 0.5,
-        derivative_weights: Optional[Dict[str, float]] = None
-    ):
-        """
-        Args:
-            value_weight: Weight for volatility error
-            derivative_weight: Global weight for all derivatives
-            derivative_weights: Individual weights per derivative (optional)
-        """
+    """
+    Standard Sobolev loss comparing volatility values and their derivatives.
+    """
+    def __init__(self, value_weight: float = 1.0, derivative_weight: float = 0.5):
         super().__init__()
         self.value_weight = value_weight
         self.derivative_weight = derivative_weight
-        self.derivative_weights = derivative_weights or {}
     
-    def forward(self, pred_vol, true_vol,pred_derivs: Optional[Dict[str, torch.Tensor]] = None,
-        true_derivs: Optional[Dict[str, torch.Tensor]] = None) :
+    def forward(
+        self, 
+        pred_vol: torch.Tensor, 
+        true_vol: torch.Tensor, 
+        pred_derivs: Optional[Dict[str, torch.Tensor]] = None, 
+        true_derivs: Optional[Dict[str, torch.Tensor]] = None
+    ) -> Tuple[torch.Tensor, Dict[str, float]]:
         
-        #Volatility weighted loss
+        # Compute Mean Absolute Error for volatility
         vol_loss = torch.mean(torch.abs(pred_vol - true_vol))
-        total_loss =  vol_loss*self.value_weight
-        loss_breakdown = {'volatility_loss': vol_loss.item(),}
+        total_loss = vol_loss * self.value_weight
         
-        # Derivative losses
+        loss_breakdown = {'volatility_loss': vol_loss.item()}
+        
+        # Compute Mean Absolute Error for derivatives (Greeks)
         if pred_derivs is not None and true_derivs is not None:
             deriv_loss_total = 0.0
             num_derivs = 0
-            for deriv_name in pred_derivs.keys():
-                if deriv_name in true_derivs:
-                    pred_d = pred_derivs[deriv_name]
-                    true_d = true_derivs[deriv_name]
-                    deriv_loss = torch.mean(torch.abs(pred_d - true_d))
-                    
-                    # Apply individual weight if specified
-                    weight = self.derivative_weights.get(deriv_name, 1.0)
-                    deriv_loss_total += weight * deriv_loss
+            
+            for name, p_deriv in pred_derivs.items():
+                if name in true_derivs:
+                    t_deriv = true_derivs[name]
+                    d_loss = torch.mean(torch.abs(p_deriv - t_deriv))
+                    deriv_loss_total += d_loss
                     num_derivs += 1
-                    
-                    loss_breakdown[f'{deriv_name}_loss'] = deriv_loss.item()
+                    loss_breakdown[f'{name}_loss'] = d_loss.item()
             
             if num_derivs > 0:
-                # Average over derivatives and apply global weight
                 avg_deriv_loss = deriv_loss_total / num_derivs
                 total_loss += self.derivative_weight * avg_deriv_loss
                 loss_breakdown['avg_derivative_loss'] = avg_deriv_loss.item()
         
         loss_breakdown['total_loss'] = total_loss.item()
-        
         return total_loss, loss_breakdown
-
-
-class AdaptiveDerivativeLoss(nn.Module):
-    """
-    Adaptive loss that adjusts derivative weights during training
-    based on which derivatives are harder to predict
-    """
-    
-    def __init__(
-        self,
-        value_weight: float = 1.0,
-        derivative_weight: float = 0.5,
-        adaptive: bool = True
-    ):
-        super().__init__()
-        self.value_weight = value_weight
-        self.derivative_weight = derivative_weight
-        self.adaptive = adaptive
-        
-        # Track derivative difficulties
-        self.deriv_errors = {}
-        self.update_count = 0
-    
-    def forward(
-        self,
-        pred_vol,
-        true_vol,
-        pred_derivs: Optional[Dict[str, torch.Tensor]] = None,
-        true_derivs: Optional[Dict[str, torch.Tensor]] = None
-    ) -> Tuple[torch.Tensor, Dict[str, float]]:
-        
-        # Volatility loss
-        vol_loss = torch.mean(torch.abs(pred_vol - true_vol))
-        total_loss = self.value_weight * vol_loss
-        
-        loss_breakdown = {'volatility_loss': vol_loss.item()}
-        
-        # Derivative losses with adaptive weighting
-        if pred_derivs is not None and true_derivs is not None:
-            deriv_loss_total = 0.0
-            current_errors = {}
-            
-            for deriv_name in pred_derivs.keys():
-                if deriv_name in true_derivs:
-                    pred_d = pred_derivs[deriv_name]
-                    true_d = true_derivs[deriv_name]
-                    
-                    deriv_loss = torch.mean(torch.abs(pred_d - true_d))
-                    current_errors[deriv_name] = deriv_loss.item()
-                    
-                    # Adaptive weight based on historical difficulty
-                    if self.adaptive and deriv_name in self.deriv_errors:
-                        # Harder derivatives get more weight
-                        avg_error = np.mean(self.deriv_errors[deriv_name][-10:])  # Last 10 updates
-                        adaptive_weight = avg_error / (sum(self.deriv_errors[d][-1] for d in self.deriv_errors) + 1e-8)
-                    else:
-                        adaptive_weight = 1.0
-                    
-                    deriv_loss_total += adaptive_weight * deriv_loss
-                    loss_breakdown[f'{deriv_name}_loss'] = deriv_loss.item()
-                    loss_breakdown[f'{deriv_name}_weight'] = adaptive_weight
-            
-            # Update error history
-            for deriv_name, error in current_errors.items():
-                if deriv_name not in self.deriv_errors:
-                    self.deriv_errors[deriv_name] = []
-                self.deriv_errors[deriv_name].append(error)
-            
-            self.update_count += 1
-            
-            avg_deriv_loss = deriv_loss_total / len(pred_derivs)
-            total_loss += self.derivative_weight * avg_deriv_loss
-            loss_breakdown['avg_derivative_loss'] = avg_deriv_loss.item()
-        
-        loss_breakdown['total_loss'] = total_loss.item()
-        
-        return total_loss, loss_breakdown
-
-
-class GradientMatchingLoss(nn.Module):
-    """
-    Alternative: Match gradients using automatic differentiation
-    More principled than finite differences
-    """
-    
-    def __init__(self, value_weight: float = 1.0, gradient_weight: float = 0.5):
-        super().__init__()
-        self.value_weight = value_weight
-        self.gradient_weight = gradient_weight
-    
-    def forward(
-        self,
-        model: nn.Module,
-        inputs: torch.Tensor,
-        true_vol: torch.Tensor,
-        true_grads: Dict[str, torch.Tensor]
-    ) -> Tuple[torch.Tensor, Dict[str, float]]:
-        """
-        Compute loss matching both values and gradients
-        
-        Args:
-            model: The neural network
-            inputs: Input features [batch_size, n_features]
-            true_vol: True volatilities
-            true_grads: True gradients wrt each input feature
-        """
-        
-        # Enable gradient computation for inputs
-        inputs.requires_grad_(True)
-        
-        # Forward pass
-        pred_vol = model(inputs)
-        
-        # Value loss
-        vol_loss = torch.mean(torch.abs(pred_vol - true_vol))
-        total_loss = self.value_weight * vol_loss
-        
-        loss_breakdown = {'volatility_loss': vol_loss.item()}
-        
-        # Gradient loss
-        if true_grads:
-            grad_loss_total = 0.0
-            
-            # Compute gradients wrt inputs
-            for i, (grad_name, true_grad) in enumerate(true_grads.items()):
-                # Compute ∂(pred_vol)/∂(input_i)
-                pred_grad = torch.autograd.grad(
-                    outputs=pred_vol,
-                    inputs=inputs,
-                    grad_outputs=torch.ones_like(pred_vol),
-                    create_graph=True,
-                    retain_graph=True
-                )[0][:, i:i+1]
-                
-                grad_loss = torch.mean(torch.abs(pred_grad - true_grad))
-                grad_loss_total += grad_loss
-                loss_breakdown[f'{grad_name}_gradient_loss'] = grad_loss.item()
-            
-            avg_grad_loss = grad_loss_total / len(true_grads)
-            total_loss += self.gradient_weight * avg_grad_loss
-            loss_breakdown['avg_gradient_loss'] = avg_grad_loss.item()
-        
-        loss_breakdown['total_loss'] = total_loss.item()
-        
-        return total_loss, loss_breakdown
-
-
-
-def create_loss_function(loss_type: str = 'derivative', **kwargs) -> nn.Module:
-    """
-    Factory function to create loss functions
-    
-    Args:
-        loss_type: 'derivative', 'adaptive', or 'gradient_matching'
-        **kwargs: Additional arguments for the loss function
-        
-    Returns:
-        Loss function module
-    """
-    
-    loss_functions = {
-        'derivative': DerivativeLoss,
-        'adaptive': AdaptiveDerivativeLoss,
-        'gradient_matching': GradientMatchingLoss,
-    }
-    
-    if loss_type not in loss_functions:
-        raise ValueError(f"Unknown loss type: {loss_type}. Choose from {list(loss_functions.keys())}")
-    
-    return loss_functions[loss_type](**kwargs)
-
 
 if __name__ == "__main__":
-   
-    
+    # Unit Test with synthetic data
     batch_size = 32
     
-    pred_vol = torch.randn(batch_size, 1) * 0.01 + 0.01
-    true_vol = torch.randn(batch_size, 1) * 0.01 + 0.01
+    # Simulate volatility outputs
+    pred_v = torch.randn(batch_size, 1) * 0.01 + 0.01
+    true_v = torch.randn(batch_size, 1) * 0.01 + 0.01
     
-    pred_derivs = {
-        'dV_dbeta': torch.randn(batch_size, 1) * 0.001,
-        'dV_drho': torch.randn(batch_size, 1) * 0.001,
-        'dV_dvolvol': torch.randn(batch_size, 1) * 0.005,
-        'dV_dF': torch.randn(batch_size, 1) * 0.001,
-        'dV_dK': torch.randn(batch_size, 1) * 0.001,
-    }
+    # Simulate derivative outputs (Greeks)
+    greeks = ['dV_dbeta', 'dV_drho', 'dV_dvolvol', 'dV_dF', 'dV_dK']
+    pred_d = {g: torch.randn(batch_size, 1) * 0.001 for g in greeks}
+    true_d = {g: torch.randn(batch_size, 1) * 0.001 for g in greeks}
     
-    true_derivs = {
-        'dV_dbeta': torch.randn(batch_size, 1) * 0.001,
-        'dV_drho': torch.randn(batch_size, 1) * 0.001,
-        'dV_dvolvol': torch.randn(batch_size, 1) * 0.005,
-        'dV_dF': torch.randn(batch_size, 1) * 0.001,
-        'dV_dK': torch.randn(batch_size, 1) * 0.001,
-    }
+    # Initialize and run loss
+    criterion = DerivativeLoss(value_weight=1.0, derivative_weight=0.5)
+    loss, breakdown = criterion(pred_v, true_v, pred_d, true_d)
     
-    # Test different loss functions
-    print("\n1. DerivativeLoss:")
-    loss_fn = DerivativeLoss(value_weight=1.0, derivative_weight=0.5)
-    loss, breakdown = loss_fn(pred_vol, true_vol, pred_derivs, true_derivs)
-    print(f"   Total loss: {loss.item():.6f}")
+    print("\n--- Loss Test Results ---")
     for key, value in breakdown.items():
-        print(f"   {key}: {value:.6f}")
-    
-    print("\n2. AdaptiveDerivativeLoss:")
-    loss_fn = AdaptiveDerivativeLoss(value_weight=1.0, derivative_weight=0.5)
-    loss, breakdown = loss_fn(pred_vol, true_vol, pred_derivs, true_derivs)
-    print(f"   Total loss: {loss.item():.6f}")
-    
+        print(f"{key:20}: {value:.6f}")

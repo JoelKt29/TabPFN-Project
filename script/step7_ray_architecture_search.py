@@ -35,9 +35,8 @@ current_dir = os.path.dirname(current_script_path)
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
-# Étape C: Import direct (SANS le nom du dossier devant)
 
-from step6_loss_with_derivatives import create_loss_function
+from step6_loss_with_derivatives import DerivativeLoss
 
 
 class Swish(nn.Module):
@@ -278,11 +277,8 @@ def train_model_ray(config: dict):
     
     # Loss function
     if has_derivatives and config.get('use_derivative_loss', True):
-        criterion = create_loss_function(
-            loss_type='derivative',
-            value_weight=config.get('value_weight', 1.0),
-            derivative_weight=config.get('derivative_weight', 0.5)
-        )
+        criterion = DerivativeLoss(value_weight=1.0, derivative_weight=0.5)
+        
     else:
         criterion = nn.L1Loss()
     

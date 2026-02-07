@@ -20,7 +20,6 @@ def compute_config_samples(args):
         # 1. Création unique des modèles pour les dérivées (11 modèles au lieu de 88)
         base = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=beta, rho=rho, volvol=volvol)
         
-        # Dérivées (on pré-calcule les modèles décalés)
         # Beta
         b_up, b_dn = min(beta + eps, 0.9999), max(beta - eps, 0.01)
         m_b_up = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=b_up, rho=rho, volvol=volvol)
@@ -54,14 +53,14 @@ def compute_config_samples(args):
         for k in strikes:
             v_base = base.normal_vol(k)
             
-            # Calcul des dérivées par différences finies
+            #Finite difference method
             dv_db = (m_b_up.normal_vol(k) - m_b_dn.normal_vol(k)) / (b_up - b_dn)
             dv_dr = (m_r_up.normal_vol(k) - m_r_dn.normal_vol(k)) / (r_up - r_dn)
             dv_dvv = (m_vv_up.normal_vol(k) - m_vv_dn.normal_vol(k)) / (vv_up - vv_dn)
             dv_dva = (m_va_up.normal_vol(k) - m_va_dn.normal_vol(k)) / (va_up - va_dn)
             dv_df = (m_f_up.normal_vol(k) - m_f_dn.normal_vol(k)) / (f_up - f_dn)
             
-            # dV/dK (Spécifique au strike)
+            # dV/dK which is special
             k_eps = eps * max(abs(k), 0.01)
             dv_dk = (base.normal_vol(k + k_eps) - base.normal_vol(k - k_eps)) / (2 * k_eps)
 

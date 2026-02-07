@@ -49,3 +49,8 @@ plt.title(f" TabPFN - MAE: {mae:.2e}")
 plt.legend()
 plt.grid(True, alpha=0.3)
 plt.show()
+
+
+graph_dir = current_dir.parent / "graph"
+save_path = graph_dir / "step4_performance_scatter.png"
+plt.savefig(save_path, dpi=300, bbox_inches='tight')
