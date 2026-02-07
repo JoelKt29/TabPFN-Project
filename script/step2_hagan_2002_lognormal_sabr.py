@@ -4,6 +4,7 @@ from pysabr import black
 from scipy.optimize import minimize
 
 
+
 class Hagan2002LognormalSABR(BaseLognormalSABR):
     """Hagan 2002 SABR lognormal vol expansion model - ATM normal vol input."""
 

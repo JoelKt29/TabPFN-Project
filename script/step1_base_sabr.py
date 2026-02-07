@@ -4,7 +4,6 @@ import numpy as np
 
 
 
-
 class BaseSABR(metaclass=ABCMeta):
     """Base class for SABR models."""
 
