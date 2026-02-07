@@ -48,7 +48,7 @@ class DerivativeLoss(nn.Module):
 
 if __name__ == "__main__":
     # Unit Test with synthetic data
-    batch_size = 32
+    batch_size = 64
     
     # Simulate volatility outputs
     pred_v = torch.randn(batch_size, 1) * 0.01 + 0.01
