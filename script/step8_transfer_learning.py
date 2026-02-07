@@ -73,7 +73,7 @@ def run_step8():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = TabPFNStackingModel(config).to(device)
-    criterion = DerivativeLoss(value_weight=1.0, derivative_weight=0.5)
+    criterion = DerivativeLoss(value_weight=1.0, derivative_weight=0.05)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.get('lr', 0.0016))
     model.train()
     batch_size = config.get('batch_size', 128)
