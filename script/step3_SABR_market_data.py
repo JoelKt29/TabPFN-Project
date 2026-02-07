@@ -18,7 +18,6 @@ count = 0
 pbar = tqdm(total=MAX_SAMPLES)
 
 while count < MAX_SAMPLES:
-    # Échantillonnage aléatoire dans les plages spécifiées par Peter
     beta = np.random.uniform(0.25, 0.99)
     rho = np.random.uniform(-0.25, 0.25)
     volvol = np.random.uniform(0.15, 0.25)
@@ -61,7 +60,7 @@ df_sabr = pd.DataFrame(data_list)
 X_raw = df_sabr.drop(columns=['volatility_output'])
 y_raw = df_sabr['volatility_output']
 
-#Cant scale constant variable
+#As you can't scale constant variable
 non_constant_cols = ['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']
 X_variable = X_raw[non_constant_cols]
 X_constant = X_raw.drop(columns=non_constant_cols)
