@@ -277,7 +277,7 @@ def train_model_ray(config: dict):
     
     # Loss function
     if has_derivatives and config.get('use_derivative_loss', True):
-        criterion = DerivativeLoss(value_weight=1.0, derivative_weight=0.5)
+        criterion = DerivativeLoss(value_weight=1.0, derivative_weight=0.05)
         
     else:
         criterion = nn.L1Loss()
