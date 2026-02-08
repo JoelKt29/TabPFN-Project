@@ -16,13 +16,10 @@ device = 'cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.i
 class TabPFNStackingModel(nn.Module):
     def __init__(self, config, n_outputs=7):
         super().__init__()
-        # 8 SABR features + 1 TabPFN raw prediction
-        input_dim = 9 
-        
+        input_dim = 9  # 8 SABR features + 1 TabPFN raw predictio
         layers = []
         prev_dim = input_dim
         h_dims = config.get('hidden_dims', [512, 256, 128])
-        
         for h_dim in h_dims:
             layers.extend([
                 nn.Linear(prev_dim, h_dim),
@@ -35,7 +32,6 @@ class TabPFNStackingModel(nn.Module):
         self.head = nn.Sequential(*layers)
 
     def forward(self, x_sabr, x_tabpfn):
-        # Concatenate SABR features with TabPFN prior
         combined = torch.cat([x_sabr, x_tabpfn], dim=1)
         return self.head(combined)
 
@@ -51,7 +47,7 @@ def run_step8():
     X_raw = df[feature_cols].values
     y_raw = df[target_cols].values
 
-    tabpfn = TabPFNRegressor(device)
+    tabpfn = TabPFNRegressor(device=device)
     
     train_idx = np.random.choice(len(df), 500, replace=False)
     tabpfn.fit(X_raw[train_idx], y_raw[train_idx, 0])
@@ -62,10 +58,15 @@ def run_step8():
     Y = torch.FloatTensor(y_raw)
 
     model = TabPFNStackingModel(config).to(device)
-    criterion = DerivativeLoss(value_weight=1.0, derivative_weight=0.05)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.get('lr', 0.0016))
+    criterion = DerivativeLoss(value_weight=config.get('value_weight'), 
+                derivative_weight=config.get('derivative_weight'))
+    opt_type = config.get('optimizer', 'adamw')
+    if opt_type == 'adam':
+        optimizer = torch.optim.Adam(model.parameters(), lr=config.get('lr'))
+    else:
+        optimizer = torch.optim.AdamW(model.parameters(), lr=config.get('lr'), weight_decay=config.get('weight_decay'))
     model.train()
-    batch_size = config.get('batch_size', 128)
+    batch_size = config.get('batch_size')
     
 
     for epoch in range(101):
