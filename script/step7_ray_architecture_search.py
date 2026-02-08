@@ -191,8 +191,7 @@ def train_model_ray(config: dict):
     """
     
     # Set device
-    device = 'cpu'
-    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")    
     # Load data (assumes data is already prepared)
     # CRITICAL: Ray Tune changes working directory, must use absolute path
     raw_path = config.get('data_path',data_dir / 'sabr_with_derivatives_scaled.csv')
@@ -374,7 +373,7 @@ def run_ray_tune_search(
     data_path: str = data_dir / 'sabr_with_derivatives_scaled.csv',
     num_samples: int = 100,
     max_epochs: int = 50,
-    gpus_per_trial: float = 0.0,
+    gpus_per_trial: float = 1.0,
     output_dir: str = './ray_results'
 ):
     """
@@ -456,7 +455,7 @@ def run_ray_tune_search(
     tuner = tune.Tuner(
         tune.with_resources(
             train_model_ray,
-            resources={"cpu": 4, "gpu": 0}
+            resources={"cpu": 2, "gpu": 1}
         ),
         tune_config=tune.TuneConfig(
             scheduler=scheduler,
@@ -506,7 +505,7 @@ if __name__ == "__main__":
                         help='Number of configurations to try')
     parser.add_argument('--epochs', type=int, default=50,
                         help='Max epochs per trial')
-    parser.add_argument('--gpus', type=float, default=0,
+    parser.add_argument('--gpus', type=float, default=1.0,
                         help='GPU fraction per trial (0 for CPU only)')
     parser.add_argument('--output', type=str, default='./ray_results',
                         help='Output directory')
