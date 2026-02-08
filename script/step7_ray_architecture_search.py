@@ -17,7 +17,12 @@ from pathlib import Path
 from sklearn.model_selection import train_test_split
 
 
-
+if torch.cuda.is_available():
+    gpu = 1.0 
+    cpus = 2    
+else:
+    gpu = 0.0
+    cpus = os.cpu_count()
 
 current_dir = Path(__file__).resolve().parent
 data_dir = current_dir.parent / "data"
@@ -250,7 +255,7 @@ def run_ray_tune_search(
     data_path: str = data_dir / 'sabr_with_derivatives_scaled.csv',
     num_samples: int = 100,
     max_epochs: int = 50,
-    gpus_per_trial: float = 1.0,
+    gpus_per_trial: float = gpu,
     output_dir: str = './ray_results'
 ):
     
@@ -293,36 +298,22 @@ def run_ray_tune_search(
     print("="*80)
     
 
-    abs_output_dir = os.path.abspath(output_dir)
     ray.init(ignore_reinit_error=True)
-    tuner = tune.Tuner(
-        tune.with_resources(
-            train_model_ray,
-            resources={"cpu": 2, "gpu": 1}
-        ),
-        tune_config=tune.TuneConfig(
-            scheduler=scheduler,
-            search_alg=search_alg,
-            num_samples=num_samples,
-        ),
+    tuner = tune.Tuner(tune.with_resources(train_model_ray,resources={"cpu": cpus, "gpu": gpu}),
+        tune_config=tune.TuneConfig(scheduler=scheduler,search_alg=search_alg,num_samples=num_samples,),
         param_space=search_space,
         )
-    
     results = tuner.fit()
     
-    # Get best result
     best_result = results.get_best_result(metric="val_loss", mode="min")
     
-    print("\n" + "="*80)
-    print("BEST CONFIGURATION FOUND")
-    print("="*80)
+
     print(f"Best MAE: {best_result.metrics['val_mae']:.8f}")
     print(f"\nBest configuration:")
     for key, value in sorted(best_result.config.items()):
         if not key.startswith('_'):
             print(f"  {key}: {value}")
     
-    # Save best config
     best_config_path = Path(output_dir) / 'best_config.json'
     best_config_path.parent.mkdir(parents=True, exist_ok=True)
     best_config_to_save = best_result.config.copy()
@@ -335,28 +326,20 @@ def run_ray_tune_search(
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description='Ray Tune architecture search for SABR TabPFN')
-    parser.add_argument('--data', type=str, default=data_dir / 'sabr_with_derivatives_scaled.csv',
-                        help='Path to data CSV')
-    parser.add_argument('--samples', type=int, default=100,
-                        help='Number of configurations to try')
-    parser.add_argument('--epochs', type=int, default=50,
-                        help='Max epochs per trial')
-    parser.add_argument('--gpus', type=float, default=1.0,
-                        help='GPU fraction per trial (0 for CPU only)')
-    parser.add_argument('--output', type=str, default='./ray_results',
-                        help='Output directory')
+    parser = argparse.ArgumentParser(description='Ray Tune architecture search')
+    parser.add_argument('--data', type=str, default=data_dir / 'sabr_with_derivatives_scaled.csv')
+    parser.add_argument('--samples', type=int, default=100)
+    parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--gpus', type=float, default=gpu,)
+    parser.add_argument('--output', type=str, default='./ray_results')
     
     args = parser.parse_args()
     
-    
-    # Run search
     results, best_result = run_ray_tune_search(
         data_path=args.data,
         num_samples=args.samples,
         max_epochs=args.epochs,
         gpus_per_trial=args.gpus,
-        output_dir=args.output
-    )
+        output_dir=args.output)
     
     print("\n Ray Tune search completed")
