@@ -12,67 +12,61 @@ current_dir = Path(__file__).resolve().parent
 data_dir = current_dir.parent / "data"
 
 def compute_config_samples(args):
-    """Calcule les 8 strikes pour une seule config de paramètres"""
     f, beta, rho, volvol, v_atm_n, T, SHIFT, num_strikes, eps = args
     results = []
     
-    try:
-        # 1. Création unique des modèles pour les dérivées (11 modèles au lieu de 88)
-        base = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=beta, rho=rho, volvol=volvol)
-        
-        # Beta
-        b_up, b_dn = min(beta + eps, 0.9999), max(beta - eps, 0.01)
-        m_b_up = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=b_up, rho=rho, volvol=volvol)
-        m_b_dn = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=b_dn, rho=rho, volvol=volvol)
-        
-        # Rho
-        r_up, r_dn = min(rho + eps, 0.9999), max(rho - eps, -0.9999)
-        m_r_up = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=beta, rho=r_up, volvol=volvol)
-        m_r_dn = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=beta, rho=r_dn, volvol=volvol)
-        
-        # Volvol
-        vv_up, vv_dn = volvol + eps, max(volvol - eps, 0.01)
-        m_vv_up = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=beta, rho=rho, volvol=vv_up)
-        m_vv_dn = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=beta, rho=rho, volvol=vv_dn)
-        
-        # V_atm
-        va_eps = eps * max(abs(v_atm_n), 0.001)
-        va_up, va_dn = v_atm_n + va_eps, max(v_atm_n - va_eps, 0.0001)
-        m_va_up = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=va_up, beta=beta, rho=rho, volvol=volvol)
-        m_va_dn = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=va_dn, beta=beta, rho=rho, volvol=volvol)
-        
-        # F (Forward)
-        f_eps = eps * max(abs(f), 0.01)
-        f_up, f_dn = f + f_eps, max(f - f_eps, 0.001)
-        m_f_up = Hagan2002LognormalSABR(f=f_up, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=beta, rho=rho, volvol=volvol)
-        m_f_dn = Hagan2002LognormalSABR(f=f_dn, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=beta, rho=rho, volvol=volvol)
+   
+    # 1. Création unique des modèles pour les dérivées (11 modèles au lieu de 88)
+    base = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=beta, rho=rho, volvol=volvol)
+    
+    # Beta
+    b_up, b_dn = min(beta + eps, 0.9999), max(beta - eps, 0.01)
+    m_b_up = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=b_up, rho=rho, volvol=volvol)
+    m_b_dn = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=b_dn, rho=rho, volvol=volvol)
+    
+    # Rho
+    r_up, r_dn = min(rho + eps, 0.9999), max(rho - eps, -0.9999)
+    m_r_up = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=beta, rho=r_up, volvol=volvol)
+    m_r_dn = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=beta, rho=r_dn, volvol=volvol)
+    
+    # Volvol
+    vv_up, vv_dn = volvol + eps, max(volvol - eps, 0.01)
+    m_vv_up = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=beta, rho=rho, volvol=vv_up)
+    m_vv_dn = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=beta, rho=rho, volvol=vv_dn)
+    
+    # V_atm
+    va_eps = eps * max(abs(v_atm_n), 0.001)
+    va_up, va_dn = v_atm_n + va_eps, max(v_atm_n - va_eps, 0.0001)
+    m_va_up = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=va_up, beta=beta, rho=rho, volvol=volvol)
+    m_va_dn = Hagan2002LognormalSABR(f=f, shift=SHIFT, t=T, v_atm_n=va_dn, beta=beta, rho=rho, volvol=volvol)
+    
+    # F 
+    f_eps = eps * max(abs(f), 0.01)
+    f_up, f_dn = f + f_eps, max(f - f_eps, 0.001)
+    m_f_up = Hagan2002LognormalSABR(f=f_up, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=beta, rho=rho, volvol=volvol)
+    m_f_dn = Hagan2002LognormalSABR(f=f_dn, shift=SHIFT, t=T, v_atm_n=v_atm_n, beta=beta, rho=rho, volvol=volvol)
 
-        alpha_val = base.alpha()
-        strikes = np.linspace(0.75 * f, 1.5 * f, num_strikes)
+    alpha_val = base.alpha()
+    strikes = np.linspace(0.75 * f, 1.5 * f, num_strikes)
 
-        for k in strikes:
-            v_base = base.normal_vol(k)
-            
-            #Finite difference method
-            dv_db = (m_b_up.normal_vol(k) - m_b_dn.normal_vol(k)) / (b_up - b_dn)
-            dv_dr = (m_r_up.normal_vol(k) - m_r_dn.normal_vol(k)) / (r_up - r_dn)
-            dv_dvv = (m_vv_up.normal_vol(k) - m_vv_dn.normal_vol(k)) / (vv_up - vv_dn)
-            dv_dva = (m_va_up.normal_vol(k) - m_va_dn.normal_vol(k)) / (va_up - va_dn)
-            dv_df = (m_f_up.normal_vol(k) - m_f_dn.normal_vol(k)) / (f_up - f_dn)
-            
-            # dV/dK which is special
-            k_eps = eps * max(abs(k), 0.01)
-            dv_dk = (base.normal_vol(k + k_eps) - base.normal_vol(k - k_eps)) / (2 * k_eps)
+    for k in strikes:
+        v_base = base.normal_vol(k)
+        k_eps = eps * max(abs(k), 0.01)
 
-            results.append({
-                'beta': beta, 'rho': rho, 'volvol': volvol, 'v_atm_n': v_atm_n,
-                'alpha': alpha_val, 'F': f, 'K': k, 'log_moneyness': np.log(k/f),
-                'T': T, 'Shift': SHIFT, 'volatility': v_base,
-                'dV_dbeta': dv_db, 'dV_drho': dv_dr, 'dV_dvolvol': dv_dvv,
-                'dV_dvatm': dv_dva, 'dV_dF': dv_df, 'dV_dK': dv_dk
-            })
-    except:
-        pass
+        #Finite difference method
+        dv_db = (m_b_up.normal_vol(k) - m_b_dn.normal_vol(k)) / (b_up - b_dn)
+        dv_dr = (m_r_up.normal_vol(k) - m_r_dn.normal_vol(k)) / (r_up - r_dn)
+        dv_dvv = (m_vv_up.normal_vol(k) - m_vv_dn.normal_vol(k)) / (vv_up - vv_dn)
+        dv_dva = (m_va_up.normal_vol(k) - m_va_dn.normal_vol(k)) / (va_up - va_dn)
+        dv_df = (m_f_up.normal_vol(k) - m_f_dn.normal_vol(k)) / (f_up - f_dn)
+        dv_dk = (base.normal_vol(k + k_eps) - base.normal_vol(k - k_eps)) / (2 * k_eps)
+
+        results.append({
+            'beta': beta, 'rho': rho, 'volvol': volvol, 'v_atm_n': v_atm_n,
+            'alpha': alpha_val, 'F': f, 'K': k, 'log_moneyness': np.log(k/f),
+            'T': T, 'Shift': SHIFT, 'volatility': v_base,
+            'dV_dbeta': dv_db, 'dV_drho': dv_dr, 'dV_dvolvol': dv_dvv,
+            'dV_dvatm': dv_dva, 'dV_dF': dv_df, 'dV_dK': dv_dk})
     return results
 
 def fast_generate_sabr(num_samples=5000, num_strikes=8):
@@ -101,12 +95,7 @@ def fast_generate_sabr(num_samples=5000, num_strikes=8):
 
 
 def scale_data_with_derivatives(df):
-    """
-    Scale features and outputs (including derivatives)
     
-    Returns:
-        df_scaled, scaling_params
-    """
     
     feature_cols = ['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']
     derivative_cols = ['dV_dbeta', 'dV_drho', 'dV_dvolvol', 'dV_dvatm', 'dV_dF', 'dV_dK']
@@ -129,24 +118,15 @@ def scale_data_with_derivatives(df):
             'max': float(scaler.data_max_[0])
         }
     
-    df_scaled = pd.concat([
-        X_scaled_df,
-        df[constant_cols],
-        pd.DataFrame({'volatility_scaled': vol_scaled}),
-        derivs_scaled
-    ], axis=1)
+    df_scaled = pd.concat([X_scaled_df, df[constant_cols],
+        pd.DataFrame({'volatility_scaled': vol_scaled}),derivs_scaled], axis=1)
     
     scaling_params = {
         'volatility': {'min': float(vol_min), 'max': float(vol_max)},
         'features': {
-            col: {
-                'min': float(scaler_X.data_min_[i]),
-                'max': float(scaler_X.data_max_[i])
-            }
-            for i, col in enumerate(feature_cols)
-        },
-        'derivatives': scaler_derivs
-    }
+            col: {'min': float(scaler_X.data_min_[i]),'max': float(scaler_X.data_max_[i])}
+            for i, col in enumerate(feature_cols)},
+        'derivatives': scaler_derivs}
     return df_scaled, scaling_params
 
 if __name__ == "__main__":

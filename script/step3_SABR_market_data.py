@@ -5,9 +5,10 @@ from sklearn.preprocessing import MinMaxScaler
 import json
 from tqdm import tqdm 
 from pathlib import Path
+
+
 current_dir = Path(__file__).resolve().parent
 data_dir = current_dir.parent / "data"
-
 np.random.seed(42)
 
 T = 1.0
