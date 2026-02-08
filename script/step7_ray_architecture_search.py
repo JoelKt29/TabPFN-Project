@@ -1,5 +1,5 @@
 import os
-os.environ['RAY_DEDUP_LOGS'] = '0'  # Reduce Ray logging
+os.environ['RAY_DEDUP_LOGS'] = '0'  # For a better logging arrangement
 import numpy as np
 import pandas as pd
 import torch
@@ -243,26 +243,15 @@ def train_model_ray(config: dict):
         val_mae /= len(val_loader)
         scheduler.step(val_loss)
         
-        tune.report({
-            'train_loss': train_loss,
-            'val_loss': val_loss,
-            'val_mae': val_mae,
-            'epoch': epoch
-        })
+        tune.report({'train_loss': train_loss,'val_loss': val_loss,'val_mae': val_mae,'epoch': epoch})
 
 
 def run_ray_tune_search(
-    data_path: str = data_dir / 'sabr_with_derivatives_scaled.csv',
-    num_samples: int = 100,
-    max_epochs: int = 50,
-    gpus_per_trial: float = gpu,
-    output_dir: str = './ray_results'
-):
+    data_path: str = data_dir / 'sabr_with_derivatives_scaled.csv',num_samples: int = 100,max_epochs: int = 50,
+    gpus_per_trial: float = gpu,output_dir: str = './ray_results'):
     
     
-    search_space = {
-        'data_path': os.path.abspath(data_path),
-        'model_type': tune.choice(['transformer', 'mlp']),
+    search_space = {'data_path': os.path.abspath(data_path),'model_type': tune.choice(['transformer', 'mlp']),
         'activation': tune.choice(['swish', 'mish', 'gelu', 'selu']),  # All differentiable
         
         # Transformer-specific
@@ -274,20 +263,15 @@ def run_ray_tune_search(
         # MLP-specific
         'hidden_dims': tune.choice([(512, 256, 128), (256, 128, 64)]),
         
-        # Training
         'batch_size': tune.choice([32, 64, 128]),
         'lr': tune.loguniform(1e-5, 1e-2),
         'dropout': tune.uniform(0.0, 0.3),
         'optimizer': tune.choice(['adam', 'adamw']),
         'weight_decay': tune.loguniform(1e-6, 1e-3),
         'num_epochs': max_epochs,
-
-        # Loss
         'use_derivative_loss':True,
         'value_weight': tune.uniform(0.5, 1.5),
-        'derivative_weight': tune.uniform(0.1, 1.0),
-        
-    }
+        'derivative_weight': tune.uniform(0.1, 1.0),}
     
     scheduler = ASHAScheduler(time_attr='epoch',metric='val_loss',mode='min',
         max_t=max_epochs,grace_period=20,reduction_factor=2,)
@@ -301,8 +285,7 @@ def run_ray_tune_search(
     ray.init(ignore_reinit_error=True)
     tuner = tune.Tuner(tune.with_resources(train_model_ray,resources={"cpu": cpus, "gpu": gpu}),
         tune_config=tune.TuneConfig(scheduler=scheduler,search_alg=search_alg,num_samples=num_samples,),
-        param_space=search_space,
-        )
+        param_space=search_space,)
     results = tuner.fit()
     
     best_result = results.get_best_result(metric="val_loss", mode="min")
