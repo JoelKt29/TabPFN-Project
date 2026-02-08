@@ -19,11 +19,10 @@ import ray
 from ray import tune, train
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.search.optuna import OptunaSearch
-
+import sys
 from pathlib import Path
 current_dir = Path(__file__).resolve().parent
 data_dir = current_dir.parent / "data"
-import sys
 data_path = os.path.abspath(data_dir / 'sabr_with_derivatives_scaled.csv')
 
 

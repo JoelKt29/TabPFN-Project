@@ -50,19 +50,16 @@ if __name__ == "__main__":
     # Unit Test with synthetic data
     batch_size = 64
     
-    # Simulate volatility outputs
+    # Simulated  outputs
     pred_v = torch.randn(batch_size, 1) * 0.01 + 0.01
     true_v = torch.randn(batch_size, 1) * 0.01 + 0.01
-    
-    # Simulate derivative outputs (Greeks)
     greeks = ['dV_dbeta', 'dV_drho', 'dV_dvolvol', 'dV_dF', 'dV_dK']
     pred_d = {g: torch.randn(batch_size, 1) * 0.001 for g in greeks}
     true_d = {g: torch.randn(batch_size, 1) * 0.001 for g in greeks}
     
-    # Initialize and run loss
     criterion = DerivativeLoss(value_weight=1.0, derivative_weight=0.5)
     loss, breakdown = criterion(pred_v, true_v, pred_d, true_d)
     
     print("\n--- Loss Test Results ---")
     for key, value in breakdown.items():
-        print(f"{key:20}: {value:.6f}")
+        print(f"{key:20}: {value:.2f}")
