@@ -57,5 +57,13 @@ ax2.set_xlabel("Valeur de Alpha (Input)")
 ax2.set_ylabel("Impact Causal")
 ax2.grid(True, alpha=0.3)
 
+current_dir = Path(__file__).resolve().parent
+graph_dir = current_dir.parent/"graph"
+save_name="stress_test.png"
+save_path = graph_dir / 'save_name'
+
+plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
+print(f"Successfully saved to: {save_path}")
+
 plt.tight_layout()
 plt.show()
