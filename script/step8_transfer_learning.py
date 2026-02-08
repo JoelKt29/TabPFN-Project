@@ -10,8 +10,9 @@ from step6_loss_with_derivatives import DerivativeLoss
 current_dir = Path(__file__).resolve().parent
 data_dir = current_dir.parent / "data"
 config_path = current_dir / "ray_results" / "best_config.json"
+device = 'cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu')
 
-#=
+
 class TabPFNStackingModel(nn.Module):
     def __init__(self, config, n_outputs=7):
         super().__init__()
@@ -40,15 +41,8 @@ class TabPFNStackingModel(nn.Module):
 
 
 def run_step8():
-    # Load hyperparams from Step 7
-    if config_path.exists():
-        with open(config_path, "r") as f:
-            config = json.load(f)
-        print(f"📂 Step 7 config loaded from: {config_path}")
-    else:
-        print("⚠️ Config not found. Using default hyperparameters.")
-        config = {"hidden_dims": [512, 256, 128], "lr": 0.0016, "dropout": 0.09}
-
+    with open(config_path, "r") as f:
+        config = json.load(f)
     csv_path = data_dir / "sabr_with_derivatives_scaled.csv"
     df = pd.read_csv(csv_path)    
     feature_cols = ['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']
@@ -57,21 +51,16 @@ def run_step8():
     X_raw = df[feature_cols].values
     y_raw = df[target_cols].values
 
-    # Generate TabPFN prior (The "Brain" feature)
-    print("🔄 Generating TabPFN priors...")
-    tabpfn = TabPFNRegressor(device='cpu')
+    tabpfn = TabPFNRegressor(device)
     
-    # Use 500 samples for In-Context Learning context
     train_idx = np.random.choice(len(df), 500, replace=False)
     tabpfn.fit(X_raw[train_idx], y_raw[train_idx, 0])
     tabpfn_preds = tabpfn.predict(X_raw).reshape(-1, 1)
 
-    # Tensors preparation
     X_sabr = torch.FloatTensor(X_raw)
     X_tabpfn = torch.FloatTensor(tabpfn_preds)
     Y = torch.FloatTensor(y_raw)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = TabPFNStackingModel(config).to(device)
     criterion = DerivativeLoss(value_weight=1.0, derivative_weight=0.05)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.get('lr', 0.0016))
@@ -82,7 +71,6 @@ def run_step8():
     for epoch in range(101):
         permutation = torch.randperm(X_sabr.size(0))
         epoch_loss = 0
-        
         for i in range(0, X_sabr.size(0), batch_size):
             indices = permutation[i:i+batch_size]
             bx_s, bx_t = X_sabr[indices].to(device), X_tabpfn[indices].to(device)
@@ -91,8 +79,7 @@ def run_step8():
             optimizer.zero_grad()
             out = model(bx_s, bx_t)
             
-            # Map outputs to derivative dict for Sobolev loss
-            # d1 to d6 correspond to the 6 Greeks in Y/target_cols
+            # d1 to d6 correspond to the 6 derivatives 
             pred_d = {f'd{j}': out[:, j:j+1] for j in range(1, 7)}
             true_d = {f'd{j}': by[:, j:j+1] for j in range(1, 7)}
             
@@ -111,7 +98,6 @@ def run_step8():
 
     save_path = current_dir / "tabpfn_sabr_step8_stacking.pth"
     torch.save(model.state_dict(), save_path)
-    print(f"\n Hybrid model saved at: {save_path}")
 
 if __name__ == "__main__":
     run_step8()
