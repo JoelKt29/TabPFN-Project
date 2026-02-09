@@ -45,10 +45,3 @@ To validate the model, we performed "Out-of-Distribution" stress tests, specific
 * **Monotonicity Observation:** The stress tests revealed that while the model is extremely smooth, the scaling of input features can lead to sign inversions (e.g., Alpha showing a negative causal impact). 
 * **Interpretation:** This highlights the importance of the "Inversion Layer" in the SCM. The model has learned the *strength* of the causal link perfectly, but the *direction* is tied to the normalization bounds of the training set.
 * **Diagnostic Value:** The stability of the "Impact Causal" (dV/dAlpha) across the entire range of inputs confirms that the model has reached a high level of numerical maturity and is ready for integration into a broader risk engine.
-
----
-### Technical Summary
-* **Model Type:** Hybrid Stacking SCM (TabPFN + MLP)
-* **Optimization:** Ray Tune / AdamW
-* **Regularization:** Sobolev (Derivative-based)
-* **Smoothness:** C-infinity (via SiLU)
