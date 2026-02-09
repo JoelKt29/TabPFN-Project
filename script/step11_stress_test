@@ -140,7 +140,7 @@ class TabPFNWithCustomHead(nn.Module):
         """Forward: TabPFN (frozen) → custom head"""
         with torch.no_grad():
             tabpfn_pred = torch.FloatTensor(
-                self.tabpfn.predict(x.cuda().numpy()).reshape(-1, 1)
+                self.tabpfn.predict(x.cpu().numpy()).reshape(-1, 1)
             ).to(x.device)
         
         return self.custom_head(tabpfn_pred)
