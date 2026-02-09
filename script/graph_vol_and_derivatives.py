@@ -112,6 +112,8 @@ def generate_final_report():
     axs[1, 1].set_xlabel("Strike")
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    output_path = graph_dir / f"comparison_rho_{sample['rho']:.2f}.png"
+    plt.savefig(output_path)
     plt.show()
 
 if __name__ == "__main__":
