@@ -21,95 +21,97 @@ scaling_path = data_dir / "scaling_params_derivatives.json"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def unscale(z, params):
-    """Formula for MinMaxScaler: x = z * (max - min) + min"""
     return z * (params['max'] - params['min']) + params['min']
 
 def generate_final_report():
-    print(f"🚀 Loading Min-Max parameters...")
-
     with open(config_path, 'r') as f: config = json.load(f)
     with open(scaling_path, 'r') as f: scaling_params = json.load(f)
     
     df = pd.read_csv(data_dir / 'sabr_with_derivatives_scaled.csv')
     
-    # Extract Min-Max for K, Volatility and F
-    K_PARAMS = scaling_params['features']['K']
-    VOL_PARAMS = scaling_params['volatility']
-    F_PARAMS = scaling_params['features']['F']
-
-    deriv_cols = [c for c in df.columns if c.startswith('dV_') and c.endswith('_scaled')]
-    y_cols = ['volatility_scaled'] + deriv_cols
-    num_outputs = len(y_cols)
+    # Identify output indices dynamically
+    # Expecting order: [vol, dbeta, drho, dvolvol, dvatm, dF, dK]
+    target_cols = ['volatility_scaled', 'dV_dbeta_scaled', 'dV_drho_scaled', 
+                   'dV_dvolvol_scaled', 'dV_dvatm_scaled', 'dV_dF_scaled', 'dV_dK_scaled']
     
-    # 1. Baseline Model (Step 4)
-    pfn_baseline = TabPFNRegressor(device='cpu', n_estimators=4)
-    idx_ref = np.random.choice(len(df), 500, replace=False)
-    pfn_baseline.fit(df.iloc[idx_ref][['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']].values, 
-                     df.iloc[idx_ref]['volatility_scaled'].values)
+    idx_map = {name: i for i, name in enumerate(target_cols)}
+    num_outputs = len(target_cols)
 
-    # 2. Fine-tuned Model (Step 9)
+    # Model initialization and name mapping (net to head)
     model_s9 = TabPFNStackingModel(config, n_outputs=num_outputs).to(device)
-    model_s9.load_state_dict(torch.load(model_path, map_location=device))
+    state_dict = torch.load(model_path, map_location=device)
+    
+    fixed_state_dict = {k.replace('net.', 'head.'): v for k, v in state_dict.items()}
+    model_s9.load_state_dict(fixed_state_dict)
     model_s9.eval()
 
-    # 3. Create Descaled Scenario
+    # Scenario generation
     sample = df.sample(1).iloc[0]
+    f_raw = unscale(sample['F'], scaling_params['features']['F'])
     
-    # Descale Forward price to create real strike range
-    f_raw = unscale(sample['F'], F_PARAMS)
-    
-    # Real strikes around Forward
-    raw_strikes = np.linspace(0.5 * f_raw, 1.5 * f_raw, 100)
-    # Re-scale strikes for model input: z = (x - min) / (max - min)
-    scaled_strikes = (raw_strikes - K_PARAMS['min']) / (K_PARAMS['max'] - K_PARAMS['min'])
+    raw_strikes = np.linspace(0.4 * f_raw, 1.6 * f_raw, 100)
+    k_params = scaling_params['features']['K']
+    scaled_strikes = (raw_strikes - k_params['min']) / (k_params['max'] - k_params['min'])
     
     test_batch = np.zeros((100, 8))
-    cols = ['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']
-    for i, col in enumerate(cols):
+    feature_names = ['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']
+    for i, col in enumerate(feature_names):
         test_batch[:, i] = sample[col]
     
     test_batch[:, 6] = scaled_strikes 
     test_batch[:, 7] = np.log(raw_strikes / f_raw)
 
-    # 4. Inference
+    # Baseline inference
+    pfn_baseline = TabPFNRegressor(device='cpu', n_estimators=4)
+    ref_idx = np.random.choice(len(df), 500, replace=False)
+    pfn_baseline.fit(df.iloc[ref_idx][feature_names].values, df.iloc[ref_idx]['volatility_scaled'].values)
+    
     pfn_prior = pfn_baseline.predict(test_batch).reshape(-1, 1)
+
+    # Sobolev model inference
     with torch.no_grad():
         x_raw = torch.FloatTensor(test_batch).to(device)
         x_pfn = torch.FloatTensor(pfn_prior).to(device)
         preds_s9 = model_s9(x_raw, x_pfn).cpu().numpy()
 
-    # 5. Descale Outputs
-    pfn_vol_unscaled = unscale(pfn_prior, VOL_PARAMS)
-    s9_vol_unscaled = unscale(preds_s9[:, 0:1], VOL_PARAMS)
+    # Descaling results
+    vol_params = scaling_params['volatility']
+    pfn_vol_raw = unscale(pfn_prior, vol_params).flatten()
+    s9_vol_raw = unscale(preds_s9[:, 0], vol_params)
 
-    # 6. Plotting
+    # Baseline numerical derivative for comparison (Skew)
+    baseline_skew_num = np.gradient(pfn_vol_raw, raw_strikes)
+
+    # Plotting
     plt.style.use('dark_background')
     fig, axs = plt.subplots(2, 2, figsize=(18, 12))
-    fig.suptitle(f"Final Comparison (Real Units)\nRho: {sample['rho']:.2f} | VolVol: {sample['volvol']:.2f}", fontsize=20)
+    fig.suptitle(f"Sobolev vs Baseline Analysis (Real Units)\nRho: {sample['rho']:.2f} | VolVol: {sample['volvol']:.2f}", fontsize=16)
 
-    # Plot 1: Volatility Smile
-    axs[0, 0].plot(raw_strikes, pfn_vol_unscaled, 'r--', label='Step 4 (Baseline)')
-    axs[0, 0].plot(raw_strikes, s9_vol_unscaled, 'cyan', lw=3, label='Step 9 (Sobolev)')
-    axs[0, 0].axvline(f_raw, color='gray', linestyle=':', label='ATM')
+    # 1. Volatility Smile
+    axs[0, 0].plot(raw_strikes, pfn_vol_raw, 'r--', label='Step 4: Baseline (Numerical)')
+    axs[0, 0].plot(raw_strikes, s9_vol_raw, 'cyan', lw=3, label='Step 9: Sobolev (Causal)')
+    axs[0, 0].axvline(f_raw, color='white', linestyle=':', alpha=0.5, label='ATM')
     axs[0, 0].set_title("Implied Volatility Smile")
-    axs[0, 0].set_xlabel("Strike Price")
+    axs[0, 0].set_ylabel("Volatility")
     axs[0, 0].legend()
 
-    # Greeks (Showing scaled sensitivity is standard, but axis is real K)
-    idx_dk = next((i for i, c in enumerate(y_cols) if 'dK' in c), 5)
-    axs[0, 1].plot(raw_strikes, preds_s9[:, idx_dk], 'cyan', lw=2)
+    # 2. Skew (dV/dK) - Numerical vs Predicted
+    axs[0, 1].plot(raw_strikes, baseline_skew_num, 'r--', label='Step 4: Numerical Gradient', alpha=0.6)
+    axs[0, 1].plot(raw_strikes, preds_s9[:, idx_map['dV_dK_scaled']], 'cyan', lw=3, label='Step 9: Sobolev Prediction')
     axs[0, 1].set_title("Skew Stability (dV/dK)")
-    axs[0, 1].set_xlabel("Strike")
+    axs[0, 1].legend()
 
-    idx_dvv = next((i for i, c in enumerate(y_cols) if 'dvolvol' in c), 3)
-    axs[1, 0].plot(raw_strikes, preds_s9[:, idx_dvv], 'orange', lw=2)
+    # 3. Vanna (dV/dvolvol)
+    axs[1, 0].plot(raw_strikes, preds_s9[:, idx_map['dV_dvolvol_scaled']], 'orange', lw=3, label='Step 9: Vanna')
     axs[1, 0].set_title("Vanna Sensitivity (dV/dvolvol)")
-    axs[1, 0].set_xlabel("Strike")
+    axs[1, 0].set_xlabel("Strike Price")
+    axs[1, 0].legend()
 
-    idx_drho = next((i for i, c in enumerate(y_cols) if 'drho' in c), 2)
-    axs[1, 1].plot(raw_strikes, preds_s9[:, idx_drho], 'magenta', lw=2)
+    # 4. Correlation Sensitivity (dV/drho)
+    axs[1, 1].plot(raw_strikes, preds_s9[:, idx_map['dV_drho_scaled']], 'magenta', lw=3, label='Step 9: dV/drho')
     axs[1, 1].set_title("Correlation Sensitivity (dV/drho)")
-    axs[1, 1].set_xlabel("Strike")
+    axs[1, 1].set_xlabel("Strike Price")
+    axs[1, 1].legend()
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     output_path = graph_dir / f"comparison_rho_{sample['rho']:.2f}.png"
