@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from step2_hagan_2002_lognormal_sabr import Hagan2002LognormalSABR
+from script.step02_hagan_2002_lognormal_sabr import Hagan2002LognormalSABR
 from sklearn.preprocessing import MinMaxScaler
 import json
 from tqdm import tqdm 

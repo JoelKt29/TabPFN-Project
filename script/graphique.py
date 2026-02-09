@@ -10,7 +10,7 @@ from tabpfn import TabPFNRegressor
 # --- CONFIG & PATHS ---
 current_dir = Path(__file__).resolve().parent
 project_root = current_dir.parent 
-graph_dir = project_root / "graphs"
+graph_dir = project_root / "graph"
 graph_dir.mkdir(exist_ok=True)
 
 data_dir = project_root / "data"
@@ -62,8 +62,7 @@ def generate_final_report():
     sample = df.sample(1).iloc[0]
     f_val = sample['F']
     # On génère un range de strikes pour tracer le smile
-    strikes = np.linspace(0.7 * f_val, 1.3 * f_val, 100)
-    
+    strikes = np.linspace(0.2 * f_val, 1.8 * f_val, 100)    
     test_batch = np.zeros((100, 8))
     cols = ['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']
     for i, col in enumerate(cols):

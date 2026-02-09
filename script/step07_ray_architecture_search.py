@@ -11,7 +11,7 @@ import ray
 from ray import tune, train
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.search.optuna import OptunaSearch
-from step6_loss_with_derivatives import DerivativeLoss
+from script.step06_loss_with_derivatives import DerivativeLoss
 import sys
 from pathlib import Path
 from sklearn.model_selection import train_test_split

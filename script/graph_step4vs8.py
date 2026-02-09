@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from pathlib import Path
 from tabpfn import TabPFNRegressor
-from step8_transfer_learning import TabPFNStackingModel 
+from script.step08_transfer_learning import TabPFNStackingModel 
 
 # --- 1. SETUP & REPRODUCIBILITY ---
 SEED = 42
