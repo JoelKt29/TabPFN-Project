@@ -1,69 +1,344 @@
+"""
+Step 9: Fine-tune TabPFN + Custom Head with Synthetic Causal Data (FIXED)
+- Structural Causal Model (SCM) for synthetic data generation
+- Pre-fit TabPFN on real data
+- Fine-tune on synthetic + real data with Sobolev loss
+"""
+
+import json
 import torch
-import numpy as np
-import matplotlib.pyplot as plt
+import torch.nn as nn
 import pandas as pd
+import numpy as np
 from pathlib import Path
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.model_selection import train_test_split
+from tabpfn import TabPFNRegressor  
+from step6_loss_with_derivatives import DerivativeLoss
 
-# --- 1. SETUP ---
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-current_dir = Path(__file__).resolve().parent
-model_path = current_dir / "tabpfn_sabr_step9_causal_final.pth"
-
-# On charge une ligne de données réelle comme base
-df = pd.read_csv(current_dir.parent / "data" / "sabr_with_derivatives_scaled.csv")
-sample = df.iloc[0].copy()
-
-# On définit une plage d'Alpha "Stress Test" (du très bas au très haut)
-alphas = np.linspace(df['alpha'].min(), df['alpha'].max() * 1.5, 100)
-
-# --- 2. PRÉPARATIONS DES TESTS ---
-test_inputs = []
-for a in alphas:
-    row = sample[['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']].values.copy()
-    row[4] = a  # On modifie l'Alpha
-    test_inputs.append(row)
-test_inputs = torch.FloatTensor(np.array(test_inputs)).to(device)
-
-# Simulation de l'avis TabPFN (on garde une valeur moyenne pour le test)
-fake_tab_preds = torch.full((100, 1), sample['volatility_scaled']).to(device)
-
-# --- 3. INFÉRENCE ---
-# (Assure-toi que la classe FinancialSCM est définie ou importée)
-from step9_finetuning_causal_graph import FinancialSCM 
-config = {"hidden_dims": [512, 256, 128]} # Config standard
-model = FinancialSCM(config).to(device)
-model.load_state_dict(torch.load(model_path))
-model.eval()
-
-with torch.no_grad():
-    outputs = model(test_inputs, fake_tab_preds)
-    predicted_vols = outputs[:, 0].cpu().numpy()
-    predicted_alpha_greeks = outputs[:, 4].cpu().numpy() # La dérivée dV/dalpha apprise
-
-# --- 4. GRAPHIQUE DE QUALITÉ ---
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
-
-# Haut : La Volatilité vs Alpha (Doit être une ligne droite ou courbe croissante propre)
-ax1.plot(alphas, predicted_vols, color='blue', linewidth=2)
-ax1.set_title("Test de Sensibilité Causale : Volatilité = f(Alpha)")
-ax1.set_ylabel("Volatilité Prédite")
-ax1.grid(True, alpha=0.3)
-
-# Bas : Le Grec Alpha (Doit être toujours POSITIF et STABLE)
-ax2.plot(alphas, predicted_alpha_greeks, color='green', linewidth=2)
-ax2.axhline(y=0, color='red', linestyle='--') # La limite fatidique
-ax2.set_title("Stabilité du Grec Alpha (dV/dAlpha)")
-ax2.set_xlabel("Valeur de Alpha (Input)")
-ax2.set_ylabel("Impact Causal")
-ax2.grid(True, alpha=0.3)
 
 current_dir = Path(__file__).resolve().parent
-graph_dir = current_dir.parent/"graph"
-save_name="stress_test.png"
-save_path = graph_dir / 'save_name'
+data_dir = current_dir.parent / "data"
+config_path = current_dir / "ray_results" / "best_config.json"
 
-plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
-print(f"Successfully saved to: {save_path}")
+class Swish(nn.Module):
+    """Swish activation from Step7"""
+    def forward(self, x):
+        return x * torch.sigmoid(x)
 
-plt.tight_layout()
-plt.show()
+
+class SABRCausalDataGenerator:
+    """Generate synthetic SABR data via Structural Causal Models"""
+    
+    def __init__(self, seed=42):
+        np.random.seed(seed)
+    
+    def generate_batch(self, batch_size=32):
+        """Generate synthetic SABR data with causal structure"""
+        
+        # Latent Factors (Root Nodes)
+        z_market_level = np.random.uniform(-1, 1, batch_size)
+        z_vol_regime = np.random.uniform(0.1, 2, batch_size)
+        z_smile_strength = np.random.uniform(0, 1, batch_size)
+        z_rate_level = np.random.uniform(-2, 2, batch_size)
+        
+        # SABR Parameters (Causal Mechanisms)
+        beta = 0.4 + 0.3 * (z_market_level / 2) + 0.1 * np.random.normal(0, 0.05, batch_size)
+        beta = np.clip(beta, 0.01, 1)
+        
+        rho = -0.5 + 0.3 * (z_vol_regime / 2) + 0.15 * np.random.normal(0, 0.1, batch_size)
+        rho = np.clip(rho, -0.99, 0.99)
+        
+        volvol = 0.3 + 0.4 * z_smile_strength + 0.1 * np.random.normal(0, 0.05, batch_size)
+        volvol = np.clip(volvol, 0.01, 2)
+        
+        alpha = 0.05 + 0.2 * z_vol_regime + 0.1 * np.random.normal(0, 0.02, batch_size)
+        alpha = np.clip(alpha, 0.001, 0.5)
+        
+        # Market Variables
+        F = 100 * np.exp(0.01 * z_rate_level)
+        log_moneyness = np.random.uniform(-0.5, 0.5, batch_size)
+        K = F * np.exp(log_moneyness)
+        v_atm_n = 0.15 + 0.1 * z_vol_regime + 0.05 * np.random.normal(0, 0.02, batch_size)
+        v_atm_n = np.clip(v_atm_n, 0.01, 1)
+        
+        # Volatility Surface (Hagan simplified)
+        T = 1.0
+        numerator = alpha
+        denominator = (F * K) ** ((1 - beta) / 2) * (
+            1 + ((1 - beta) ** 2 / 24) * (np.log(F / K)) ** 2 +
+            ((1 - beta) ** 4 / 1920) * (np.log(F / K)) ** 4
+        )
+        sigma_sabr = numerator / denominator
+        
+        z_term = (volvol / alpha) * (F * K) ** ((1 - beta) / 2) * np.log(F / K)
+        smile_factor = 1 + (rho * (1 - beta) / 24) * z_term + ((1 - beta ** 2) / 1920) * z_term ** 2
+        
+        volatility = sigma_sabr * smile_factor + 0.01 * np.random.normal(0, 1, batch_size)
+        volatility = np.clip(volatility, 0.01, 2)
+        
+        # Greeks (Derivatives)
+        dV_dbeta = -0.15 * sigma_sabr / beta + 0.05 * np.random.normal(0, 0.01, batch_size)
+        dV_drho = (0.3 * volvol * sigma_sabr + 0.1 * np.random.normal(0, 0.01, batch_size))
+        dV_dvolvol = 0.2 * sigma_sabr + 0.05 * np.random.normal(0, 0.01, batch_size)
+        dV_dF = -0.1 * sigma_sabr / F + 0.02 * np.random.normal(0, 0.01, batch_size)
+        dV_dK = 0.08 * sigma_sabr / K + 0.02 * np.random.normal(0, 0.01, batch_size)
+        dV_dvat = 0.4 * sigma_sabr + 0.05 * np.random.normal(0, 0.01, batch_size)
+        
+        X = np.column_stack([beta, rho, volvol, v_atm_n, alpha, F, K, log_moneyness])
+        y = np.column_stack([volatility, dV_dbeta, dV_drho, dV_dvolvol, dV_dF, dV_dK, dV_dvat])
+        
+        return X, y
+
+
+class TabPFNWithCustomHead(nn.Module):
+    """TabPFN (pre-fitted) + custom head from Step7"""
+    
+    def __init__(self, step7_config, tabpfn_fitted, num_outputs=7):
+        super().__init__()
+        
+        # Use pre-fitted TabPFN
+        self.tabpfn = tabpfn_fitted
+        
+        # Extract Step7 config
+        activation = step7_config.get('activation', 'swish')
+        hidden_dims = step7_config.get('hidden_dims', (512, 256, 128))
+        dropout = step7_config.get('dropout', 0.1)
+        
+        # Build custom head
+        if activation == 'swish':
+            act_fn = Swish()
+        elif activation == 'gelu':
+            act_fn = nn.GELU()
+        else:
+            act_fn = nn.ReLU()
+        
+        layers = []
+        prev_dim = 1
+        
+        for h_dim in hidden_dims:
+            layers.extend([
+                nn.Linear(prev_dim, h_dim),
+                self._clone_activation(act_fn),
+                nn.Dropout(dropout)
+            ])
+            prev_dim = h_dim
+        
+        layers.append(nn.Linear(prev_dim, num_outputs))
+        self.custom_head = nn.Sequential(*layers)
+    
+    @staticmethod
+    def _clone_activation(activation):
+        if isinstance(activation, Swish):
+            return Swish()
+        elif isinstance(activation, nn.GELU):
+            return nn.GELU()
+        else:
+            return nn.ReLU()
+    
+    def forward(self, x):
+        """Forward: TabPFN (frozen) → custom head"""
+        with torch.no_grad():
+            tabpfn_pred = torch.FloatTensor(
+                self.tabpfn.predict(x.cpu().numpy()).reshape(-1, 1)
+            ).to(x.device)
+        
+        return self.custom_head(tabpfn_pred)
+
+
+def fine_tune_with_synthetic_data(
+    data_path: str = data_dir/'sabr_with_derivatives_scaled.csv',
+    step7_config_path: str = config_path,
+    output_dir: str = './tabpfn_step9_synthetic',
+    num_epochs: int = 2,
+    n_synthetic_batches: int = 10
+):
+    """Fine-tune TabPFN + head with synthetic causal SABR data"""
+    
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    
+    print("\n" + "="*80)
+    print("STEP 9: FINE-TUNE TABPFN WITH SYNTHETIC CAUSAL DATA")
+    print("="*80)
+    
+    # Load Step7 config
+    print(f"\n📂 Loading Step7 config...")
+    with open(step7_config_path, 'r') as f:
+        step7_config = json.load(f)
+    
+    # Load real data
+    print(f"📈 Loading real data from {data_path}...")
+    df_real = pd.read_csv(data_path)
+    
+    feature_cols = ['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']
+    deriv_cols = [c for c in df_real.columns if c.startswith('dV_') and c.endswith('_scaled')]
+    y_cols = ['volatility_scaled'] + deriv_cols
+    
+    X_real = df_real[feature_cols].values
+    y_real = df_real[y_cols].values
+    
+    print(f"Real data: {X_real.shape[0]} samples, {len(y_cols)} outputs")
+    
+    # ============ FIT TABPFN ON REAL DATA ============
+    print(f"\n🎓 Fitting TabPFN on real data...")
+    tabpfn = TabPFNRegressor(device='cpu', n_estimators=32,ignore_pretraining_limits=True)
+    tabpfn.fit(X_real, y_real[:, 0])  # Fit on volatility
+    print(f"✅ TabPFN fitted!")
+    
+    # Split real data for validation
+    X_real_train, X_real_val, y_real_train, y_real_val = train_test_split(
+        X_real, y_real, test_size=0.2, random_state=42
+    )
+    
+    # Generate synthetic data
+    print(f"\n🔬 Generating {n_synthetic_batches} batches of synthetic causal SABR data...")
+    generator = SABRCausalDataGenerator()
+    
+    X_synth_all = []
+    y_synth_all = []
+    
+    for i in range(n_synthetic_batches):
+        X_batch, y_batch = generator.generate_batch(batch_size=64)
+        X_synth_all.append(X_batch)
+        y_synth_all.append(y_batch)
+        if (i + 1) % 20 == 0:
+            print(f"   Generated {i + 1}/{n_synthetic_batches} batches")
+    
+    X_synth = np.vstack(X_synth_all)
+    y_synth = np.vstack(y_synth_all)
+    
+    print(f"Synthetic data: {X_synth.shape[0]} samples")
+    
+    # Combine synthetic + real for training
+    X_train = np.vstack([X_synth, X_real_train])
+    y_train = np.vstack([y_synth, y_real_train])
+    
+    print(f"Combined training: {X_train.shape[0]} samples")
+    
+    # Create data loaders
+    train_loader = DataLoader(
+        TensorDataset(torch.FloatTensor(X_train), torch.FloatTensor(y_train)),
+        batch_size=step7_config['batch_size'],
+        shuffle=True
+    )
+    
+    val_loader = DataLoader(
+        TensorDataset(torch.FloatTensor(X_real_val), torch.FloatTensor(y_real_val)),
+        batch_size=step7_config['batch_size']
+    )
+    
+    # Create model with FITTED TabPFN
+    print("\n🏗️ Building TabPFN + Step7 head...")
+    model = TabPFNWithCustomHead(step7_config, tabpfn, num_outputs=len(y_cols))
+    
+    # Optimizer (only optimize custom head)
+    optimizer = torch.optim.AdamW(
+        model.custom_head.parameters(),
+        lr=step7_config['lr'],
+        weight_decay=step7_config.get('weight_decay', 1e-5)
+    )
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, 'min', patience=5, factor=0.5
+    )
+    
+    # Loss function
+    criterion = DerivativeLoss(
+        value_weight=step7_config['value_weight'],
+        derivative_weight=step7_config['derivative_weight'])
+    
+    print("\n📚 Fine-tuning with synthetic + real data...")
+    print("="*80)
+    
+    best_val_mae = float('inf')
+    history = {'train_loss': [], 'val_loss': [], 'val_mae': []}
+    
+    for epoch in range(num_epochs):
+        # Training
+        model.train()
+        train_loss = 0.0
+        
+        for batch_X, batch_y in train_loader:
+            outputs = model(batch_X)
+            
+            pred_vol = outputs[:, 0:1]
+            true_vol = batch_y[:, 0:1]
+            pred_derivs = {f'deriv_{i}': outputs[:, i:i+1] for i in range(1, outputs.size(1))}
+            true_derivs = {f'deriv_{i}': batch_y[:, i:i+1] for i in range(1, batch_y.size(1))}
+            
+            loss, _ = criterion(pred_vol, true_vol, pred_derivs, true_derivs)
+            
+            optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.custom_head.parameters(), 1.0)
+            optimizer.step()
+            
+            train_loss += loss.item()
+        
+        train_loss /= len(train_loader)
+        
+        # Validation (on real data only)
+        model.eval()
+        val_loss = 0.0
+        val_mae = 0.0
+        
+        with torch.no_grad():
+            for batch_X, batch_y in val_loader:
+                outputs = model(batch_X)
+                
+                pred_vol = outputs[:, 0:1]
+                true_vol = batch_y[:, 0:1]
+                pred_derivs = {f'deriv_{i}': outputs[:, i:i+1] for i in range(1, outputs.size(1))}
+                true_derivs = {f'deriv_{i}': batch_y[:, i:i+1] for i in range(1, batch_y.size(1))}
+                
+                loss, _ = criterion(pred_vol, true_vol, pred_derivs, true_derivs)
+                val_loss += loss.item()
+                val_mae += torch.mean(torch.abs(pred_vol - true_vol)).item()
+        
+        val_loss /= len(val_loader)
+        val_mae /= len(val_loader)
+        
+        history['train_loss'].append(train_loss)
+        history['val_loss'].append(val_loss)
+        history['val_mae'].append(val_mae)
+        
+        scheduler.step(val_loss)
+        
+        if val_mae < best_val_mae:
+            best_val_mae = val_mae
+            torch.save(model.custom_head.state_dict(), f'{output_dir}/best_head.pt')
+        
+        if (epoch + 1) % 10 == 0:
+            print(f"Epoch {epoch+1}/{num_epochs} | Train: {train_loss:.6f} | "
+                  f"Val: {val_loss:.6f} | Val MAE: {val_mae:.6f}")
+    
+    print("\n" + "="*80)
+    print("✅ STEP 9 COMPLETE")
+    print("="*80)
+    print(f"\n📊 RESULTS:")
+    print(f"   Step7 baseline (custom MLP): val_mae = 0.03021")
+    print(f"   Step9 (TabPFN + synthetic):  val_mae = {best_val_mae:.8f}")
+    print("="*80)
+    
+    # Save results
+    torch.save(model.state_dict(), f'{output_dir}/final_model.pth')
+    with open(f'{output_dir}/history.json', 'w') as f:
+        json.dump(history, f)
+    
+    print(f"\n💾 Saved:")
+    print(f"   - Head: {output_dir}/best_head.pt")
+    print(f"   - Model: {output_dir}/final_model.pth")
+    print(f"   - History: {output_dir}/history.json")
+    
+    return best_val_mae, history
+
+
+if __name__ == "__main__":
+    best_mae, history = fine_tune_with_synthetic_data(
+        data_path=data_dir/'sabr_with_derivatives_scaled.csv',
+        step7_config_path=config_path,
+        output_dir='./tabpfn_step9_synthetic',
+        num_epochs=2,
+        n_synthetic_batches=10
+    )
+    
+    print("\n✨ Step 9 fine-tuning with synthetic causal data completed!")

@@ -33,7 +33,7 @@ test_batch = np.array([
 
 # --- 3. PREDICTIONS ---
 # Step 4 Baseline
-tabpfn = TabPFNRegressor(device='cpu')
+tabpfn = TabPFNRegressor(device=device)
 train_idx = np.random.choice(len(df), 500, replace=False)
 tabpfn.fit(df.iloc[train_idx][feature_cols].values, df.iloc[train_idx]['volatility_scaled'].values)
 preds4 = tabpfn.predict(test_batch)
