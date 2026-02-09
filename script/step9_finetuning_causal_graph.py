@@ -35,11 +35,10 @@ class StackingHead(nn.Module):
         self.net = nn.Sequential(*layers)
 
     def forward(self, x_raw, x_pfn):
-        # Concaténation des features brutes et du "prior" de TabPFN
         return self.net(torch.cat([x_raw, x_pfn], dim=1))
 
-def train_fast():
-    print(f"🚀 Initialisation sur {device}...")
+def train_high_precision():
+    print(f"🚀 Initialisation Haute Précision sur {device}...")
 
     # 1. Chargement des fichiers
     with open(config_path, 'r') as f: 
@@ -47,7 +46,6 @@ def train_fast():
     
     df = pd.read_csv(data_dir / 'sabr_with_derivatives_scaled.csv')
 
-    # Sélection automatique des colonnes (évite les KeyError)
     feature_cols = ['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']
     deriv_cols = [c for c in df.columns if c.startswith('dV_') and c.endswith('_scaled')]
     y_cols = ['volatility_scaled'] + deriv_cols
@@ -57,63 +55,64 @@ def train_fast():
     num_outputs = len(y_cols)
 
     print(f"📊 Données chargées : {X_r.shape[0]} lignes.")
-    print(f"🔎 Dérivées détectées ({len(deriv_cols)}) : {deriv_cols}")
 
-    # 2. Fit TabPFN (Contexte réduit à 500 pour la vitesse)
-    print("🎓 Calibration du Prior TabPFN...")
-    tabpfn = TabPFNRegressor(device='cuda' if torch.cuda.is_available() else 'cpu', n_estimators=32, ignore_pretraining_limits=True)
-    idx = np.random.choice(len(X_r), 5000, replace=False)
+    # 2. Fit TabPFN (MAX CONTEXT : On utilise 10 000 points pour une précision maximale)
+    print("🎓 Calibration du Prior TabPFN (High Context)...")
+    tabpfn = TabPFNRegressor(device='cuda' if torch.cuda.is_available() else 'cpu', 
+                             n_estimators=32, 
+                             ignore_pretraining_limits=True)
+    
+    # On sature le contexte de TabPFN pour réduire le biais
+    ctx_size = min(len(X_r), 10000)
+    idx = np.random.choice(len(X_r), ctx_size, replace=False)
     tabpfn.fit(X_r[idx], Y_r[idx, 0])
 
-    # 3. PHASE DE PRE-CACHING (Le secret de la vitesse)
-    # On calcule les prédictions TabPFN UNE SEULE FOIS pour tout le dataset
-    print(f"🧠 Pré-calcul des priors TabPFN (Pre-caching)...")
+    # 3. PHASE DE PRE-CACHING
+    print(f"🧠 Pré-calcul des priors TabPFN...")
     pfn_priors = []
-    chunk_size = 500 
-    for i in tqdm(range(0, len(X_r), chunk_size), desc="Calcul des priors"):
+    chunk_size = 1000 # Plus gros chunks pour le GPU
+    for i in tqdm(range(0, len(X_r), chunk_size), desc="Inférence Prior"):
         chunk = X_r[i:i+chunk_size]
         pfn_priors.append(tabpfn.predict(chunk).reshape(-1, 1))
     X_pfn = np.vstack(pfn_priors)
 
     # 4. Préparation des DataLoaders
     X_train_raw, X_val_raw, X_train_pfn, X_val_pfn, Y_train, Y_val = train_test_split(
-        X_r, X_pfn, Y_r, test_size=0.2, random_state=42
+        X_r, X_pfn, Y_r, test_size=0.15, random_state=42 # Plus de données pour le train
     )
 
-    train_ds = TensorDataset(
-        torch.FloatTensor(X_train_raw), 
-        torch.FloatTensor(X_train_pfn), 
-        torch.FloatTensor(Y_train)
-    )
+    train_ds = TensorDataset(torch.FloatTensor(X_train_raw), torch.FloatTensor(X_train_pfn), torch.FloatTensor(Y_train))
+    val_ds = TensorDataset(torch.FloatTensor(X_val_raw), torch.FloatTensor(X_val_pfn), torch.FloatTensor(Y_val))
+    
     train_loader = DataLoader(train_ds, batch_size=config.get('batch_size', 128), shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=config.get('batch_size', 128), shuffle=False)
 
     # 5. Boucle d'entraînement
     model = StackingHead(config, num_outputs).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.get('lr', 1e-4))
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config.get('lr', 1e-4), weight_decay=1e-5)
+    
+    # Ajout d'un scheduler pour affiner la perte en fin d'entraînement
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5, factor=0.5)
+    
     criterion = DerivativeLoss(
         value_weight=config.get('value_weight', 1.0), 
-        derivative_weight=config.get('derivative_weight', 0.5)
+        derivative_weight=config.get('derivative_weight', 0.8) # Augmenté pour la précision des Grecs
     )
 
-    print(f"\n🔥 Début de l'entraînement ultra-rapide (50 époques)...")
-    best_loss = float('inf')
+    print(f"\n🔥 Entraînement intensif (100 époques)...")
+    best_mae = float('inf')
 
-    for epoch in range(50):
+    for epoch in range(100):
         model.train()
-        total_loss = 0
-        
-        # Barre de progression par époque
-        pbar = tqdm(train_loader, desc=f"Époque {epoch+1}/50", leave=False)
+        train_loss = 0
+        pbar = tqdm(train_loader, desc=f"Époque {epoch+1}/100", leave=False)
         
         for b_raw, b_pfn, b_y in pbar:
             b_raw, b_pfn, b_y = b_raw.to(device), b_pfn.to(device), b_y.to(device)
             
-            # Ici, on utilise b_pfn déjà calculé, c'est ce qui rend le code rapide !
             out = model(b_raw, b_pfn)
             
-            # Préparation des dictionnaires pour la DerivativeLoss
-            pred_vol = out[:, 0:1]
-            true_vol = b_y[:, 0:1]
+            pred_vol, true_vol = out[:, 0:1], b_y[:, 0:1]
             pred_der = {f'd{i}': out[:, i:i+1] for i in range(1, num_outputs)}
             true_der = {f'd{i}': b_y[:, i:i+1] for i in range(1, num_outputs)}
             
@@ -122,35 +121,37 @@ def train_fast():
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            
-            total_loss += loss.item()
+            train_loss += loss.item()
             pbar.set_postfix(loss=f"{loss.item():.5f}")
 
-            model.eval()
+        # Validation
+        model.eval()
         val_mae = 0
+        val_loss = 0
         with torch.no_grad():
-            # On utilise le set de validation (X_val_raw, X_val_pfn) définit plus haut
-            v_raw = torch.FloatTensor(X_val_raw).to(device)
-            v_pfn = torch.FloatTensor(X_val_pfn).to(device)
-            v_y = torch.FloatTensor(Y_val).to(device)
-            
-            preds = model(v_raw, v_pfn)
-            # MAE uniquement sur la volatilité (colonne 0)
-            val_mae = torch.mean(torch.abs(preds[:, 0] - v_y[:, 0])).item()
+            for v_raw, v_pfn, v_y in val_loader:
+                v_raw, v_pfn, v_y = v_raw.to(device), v_pfn.to(device), v_y.to(device)
+                preds = model(v_raw, v_pfn)
+                
+                v_loss, _ = criterion(preds[:, 0:1], v_y[:, 0:1], 
+                                     {f'd{i}': preds[:, i:i+1] for i in range(1, num_outputs)}, 
+                                     {f'd{i}': v_y[:, i:i+1] for i in range(1, num_outputs)})
+                val_loss += v_loss.item()
+                val_mae += torch.mean(torch.abs(preds[:, 0] - v_y[:, 0])).item()
 
-        if (epoch + 1) % 5 == 0:
-            print(f"Époque {epoch+1:02d} | Loss: {total_loss/len(train_loader):.5f} | Val MAE: {val_mae:.5f}")
+        avg_val_loss = val_loss / len(val_loader)
+        avg_val_mae = val_mae / len(val_loader)
+        scheduler.step(avg_val_loss)
 
-        avg_loss = total_loss / len(train_loader)
-        if avg_loss < best_loss:
-            best_loss = avg_loss
+        if avg_val_mae < best_mae:
+            best_mae = avg_val_mae
             torch.save(model.state_dict(), "tabpfn_step9_causal_final.pth")
 
-        if (epoch + 1) % 5 == 0:
-            print(f"Époque {epoch+1:02d} | Loss Moyenne: {avg_loss:.6f}")
+        if (epoch + 1) % 5 == 0 or epoch == 0:
+            print(f"📍 Époque {epoch+1:02d} | Train Loss: {train_loss/len(train_loader):.5f} | Val MAE: {avg_val_mae:.6f} | LR: {optimizer.param_groups[0]['lr']:.2e}")
 
-    print(f"\n✅ Entraînement terminé. Meilleure Loss: {best_loss:.6f}")
-    print("💾 Modèle sauvegardé sous : tabpfn_step9_causal_final.pth")
+    print(f"\n✅ Terminé. Meilleur MAE Volatilité: {best_mae:.6f}")
+    print("💾 Modèle sauvegardé : tabpfn_step9_causal_final.pth")
 
 if __name__ == "__main__":
-    train_fast()
+    train_high_precision()
