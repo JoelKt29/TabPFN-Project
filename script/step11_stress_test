@@ -150,8 +150,8 @@ def fine_tune_with_synthetic_data(
     data_path: str = data_dir/'sabr_with_derivatives_scaled.csv',
     step7_config_path: str = config_path,
     output_dir: str = './tabpfn_step9_synthetic',
-    num_epochs: int = 2,
-    n_synthetic_batches: int = 10
+    num_epochs: int = 50,
+    n_synthetic_batches: int = 100
 ):
     """Fine-tune TabPFN + head with synthetic causal SABR data"""
     
@@ -181,9 +181,8 @@ def fine_tune_with_synthetic_data(
     
     # ============ FIT TABPFN ON REAL DATA ============
     print(f"\n🎓 Fitting TabPFN on real data...")
-    tabpfn = TabPFNRegressor(device='cuda', n_estimators=4,ignore_pretraining_limits=True)
-    ctx_idx = np.random.choice(len(X_real), 500, replace=False)
-    tabpfn.fit(X_real[ctx_idx], y_real[ctx_idx, 0])
+    tabpfn = TabPFNRegressor(device='cuda', n_estimators=32,ignore_pretraining_limits=True)
+    tabpfn.fit(X_real, y_real[:, 0])  # Fit on volatility
     print(f"✅ TabPFN fitted!")
     
     # Split real data for validation
@@ -338,8 +337,8 @@ if __name__ == "__main__":
         data_path=data_dir/'sabr_with_derivatives_scaled.csv',
         step7_config_path=config_path,
         output_dir='./tabpfn_step9_synthetic',
-        num_epochs=2,
-        n_synthetic_batches=10
+        num_epochs=50,
+        n_synthetic_batches=100
     )
     
     print("\n✨ Step 9 fine-tuning with synthetic causal data completed!")
