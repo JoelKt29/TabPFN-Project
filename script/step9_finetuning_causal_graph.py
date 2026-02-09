@@ -101,7 +101,7 @@ def train():
 
         if avg_val_mae < best_mae:
             best_mae = avg_val_mae
-            torch.save(model.state_dict(), "tabpfn_step9_causal_final.pth")
+            torch.save(model.state_dict(), current_dir/"tabpfn_step9_causal_final.pth")
 
         if (epoch + 1) % 5 == 0 or epoch == 0:
             print(f" Epoch {epoch+1:02d} | Train Loss: {train_loss/len(train_loader):.5f} | Val MAE: {avg_val_mae:.6f} | LR: {optimizer.param_groups[0]['lr']:.2e}")
