@@ -49,22 +49,13 @@ with torch.no_grad():
     x_tab = torch.FloatTensor(preds4).reshape(-1, 1).to(device)
     preds8 = model(x_sabr, x_tab).cpu().numpy()[:, 0]
 
-# --- 4. GRADIENT & VOG METRICS ---
 dk = np.diff(strikes)
 slope4 = np.diff(preds4) / dk
 slope8 = np.diff(preds8) / dk
-
-# Volatility of Gradient (VoG)
 vog4 = np.std(np.diff(slope4))
 vog8 = np.std(np.diff(slope8))
-
-print(f"VoG Step 4: {vog4:.6f}")
-print(f"VoG Step 8: {vog8:.6f}")
-print(f"Stability Gain: {((vog4-vog8)/vog4)*100:.1f}%")
-
-# --- 5. PLOTTING ---
-# Use plt.subplots to keep track of the figure object
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 10), sharex=True)
+
 
 ax1.plot(strikes, preds4, 'r--', label='Step 4 (Baseline)', alpha=0.6)
 ax1.plot(strikes, preds8, 'b-', label='Step 8 (Sobolev)', linewidth=2)
@@ -81,14 +72,11 @@ ax2.set_ylabel("Slope")
 ax2.legend()
 ax2.grid(True, alpha=0.2)
 
-# --- 6. SAVE AND SHOW ---
 plt.tight_layout()
 
-# Absolute path for saving to avoid directory issues
 save_name = "step4_vs_step8_stability.png"
 save_path = graph_dir / save_name
 
-# Clear any existing plots before saving to avoid Tkinter loops
 plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
 print(f"Successfully saved to: {save_path}")
 

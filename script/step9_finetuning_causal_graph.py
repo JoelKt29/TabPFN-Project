@@ -9,97 +9,54 @@ from sklearn.model_selection import train_test_split
 from tabpfn import TabPFNRegressor 
 from step06_loss_with_derivatives import DerivativeLoss
 from tqdm import tqdm
+from step08_transfer_learning import TabPFNStackingModel
 
-# --- CONFIGURATION DES CHEMINS ---
 current_dir = Path(__file__).resolve().parent
 data_dir = current_dir.parent / "data"
 config_path = current_dir / "ray_results" / "best_config.json"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# --- ARCHITECTURE DU MODÈLE ---
-class StackingHead(nn.Module):
-    def __init__(self, config, num_outputs):
-        super().__init__()
-        # Entrée : 8 features SABR + 1 prédiction TabPFN = 9
-        h_dims = config.get('hidden_dims', [512, 256, 128])
-        layers = []
-        prev = 9 
-        for h in h_dims:
-            layers.extend([
-                nn.Linear(prev, h), 
-                nn.SiLU(), 
-                nn.Dropout(config.get('dropout', 0.05))
-            ])
-            prev = h
-        layers.append(nn.Linear(prev, num_outputs))
-        self.net = nn.Sequential(*layers)
+def train():
 
-    def forward(self, x_raw, x_pfn):
-        return self.net(torch.cat([x_raw, x_pfn], dim=1))
-
-def train_high_precision():
-    print(f"🚀 Initialisation Haute Précision sur {device}...")
-
-    # 1. Chargement des fichiers
     with open(config_path, 'r') as f: 
         config = json.load(f)
-    
     df = pd.read_csv(data_dir / 'sabr_with_derivatives_scaled.csv')
-
     feature_cols = ['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']
     deriv_cols = [c for c in df.columns if c.startswith('dV_') and c.endswith('_scaled')]
     y_cols = ['volatility_scaled'] + deriv_cols
-    
     X_r = df[feature_cols].values
     Y_r = df[y_cols].values
     num_outputs = len(y_cols)
-
-    print(f"📊 Données chargées : {X_r.shape[0]} lignes.")
-
-    # 2. Fit TabPFN (MAX CONTEXT : On utilise 10 000 points pour une précision maximale)
-    print("🎓 Calibration du Prior TabPFN (High Context)...")
     tabpfn = TabPFNRegressor(device='cuda' if torch.cuda.is_available() else 'cpu', 
-                             n_estimators=32, 
-                             ignore_pretraining_limits=True)
-    
-    # On sature le contexte de TabPFN pour réduire le biais
+                             n_estimators=32, ignore_pretraining_limits=True)
     ctx_size = min(len(X_r), 10000)
     idx = np.random.choice(len(X_r), ctx_size, replace=False)
     tabpfn.fit(X_r[idx], Y_r[idx, 0])
 
-    # 3. PHASE DE PRE-CACHING
-    print(f"🧠 Pré-calcul des priors TabPFN...")
     pfn_priors = []
-    chunk_size = 1000 # Plus gros chunks pour le GPU
+    chunk_size = 1000 
     for i in tqdm(range(0, len(X_r), chunk_size), desc="Inférence Prior"):
         chunk = X_r[i:i+chunk_size]
         pfn_priors.append(tabpfn.predict(chunk).reshape(-1, 1))
     X_pfn = np.vstack(pfn_priors)
 
-    # 4. Préparation des DataLoaders
     X_train_raw, X_val_raw, X_train_pfn, X_val_pfn, Y_train, Y_val = train_test_split(
-        X_r, X_pfn, Y_r, test_size=0.15, random_state=42 # Plus de données pour le train
-    )
+        X_r, X_pfn, Y_r, test_size=0.15, random_state=42)
 
     train_ds = TensorDataset(torch.FloatTensor(X_train_raw), torch.FloatTensor(X_train_pfn), torch.FloatTensor(Y_train))
     val_ds = TensorDataset(torch.FloatTensor(X_val_raw), torch.FloatTensor(X_val_pfn), torch.FloatTensor(Y_val))
     
-    train_loader = DataLoader(train_ds, batch_size=config.get('batch_size', 128), shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=config.get('batch_size', 128), shuffle=False)
+    train_loader = DataLoader(train_ds, batch_size=config.get('batch_size'), shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=config.get('batch_size'), shuffle=False)
 
-    # 5. Boucle d'entraînement
-    model = StackingHead(config, num_outputs).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.get('lr', 1e-4), weight_decay=1e-5)
-    
-    # Ajout d'un scheduler pour affiner la perte en fin d'entraînement
+    model = TabPFNStackingModel(config).to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config.get('lr'), weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5, factor=0.5)
     
     criterion = DerivativeLoss(
-        value_weight=config.get('value_weight', 1.0), 
-        derivative_weight=config.get('derivative_weight', 0.8) # Augmenté pour la précision des Grecs
-    )
+        value_weight=config.get('value_weight'), 
+        derivative_weight=config.get('derivative_weight'))
 
-    print(f"\n🔥 Entraînement intensif (100 époques)...")
     best_mae = float('inf')
 
     for epoch in range(100):
@@ -124,7 +81,6 @@ def train_high_precision():
             train_loss += loss.item()
             pbar.set_postfix(loss=f"{loss.item():.5f}")
 
-        # Validation
         model.eval()
         val_mae = 0
         val_loss = 0
@@ -148,10 +104,9 @@ def train_high_precision():
             torch.save(model.state_dict(), "tabpfn_step9_causal_final.pth")
 
         if (epoch + 1) % 5 == 0 or epoch == 0:
-            print(f"📍 Époque {epoch+1:02d} | Train Loss: {train_loss/len(train_loader):.5f} | Val MAE: {avg_val_mae:.6f} | LR: {optimizer.param_groups[0]['lr']:.2e}")
+            print(f" Epoch {epoch+1:02d} | Train Loss: {train_loss/len(train_loader):.5f} | Val MAE: {avg_val_mae:.6f} | LR: {optimizer.param_groups[0]['lr']:.2e}")
 
-    print(f"\n✅ Terminé. Meilleur MAE Volatilité: {best_mae:.6f}")
-    print("💾 Modèle sauvegardé : tabpfn_step9_causal_final.pth")
+    print(f"\nBest MAE: {best_mae:.6f}")
 
 if __name__ == "__main__":
-    train_high_precision()
+    train()
