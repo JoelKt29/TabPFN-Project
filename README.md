@@ -17,9 +17,9 @@ This project tackles the challenge of modeling the SABR (Sigma-Alpha-Beta-Rho) s
 - Compared predicted surfaces with theoretical SABR formulas
 
 **Key Findings**:
-- ✅ TabPFN captures the general shape of the volatility smile
-- ❌ Produces "jittery" predictions (high-frequency noise)
-- ❌ Numerical gradient computation (Skew = dV/dK) exhibits extreme noise, rendering the model unsuitable for stable hedging
+-  TabPFN captures the general shape of the volatility smile
+-  Produces "jittery" predictions (high-frequency noise)
+-  Numerical gradient computation (Skew = dV/dK) exhibits extreme noise, rendering the model unsuitable for stable hedging
 
 **Verdict**: Baseline TabPFN is too noisy for real-world risk applications.
 
@@ -103,9 +103,9 @@ Input SABR Parameters (8 dims)
 ```
 
 **Key Design Decisions**:
-- ✅ Keep TabPFN frozen (preserve pretrained knowledge)
-- ✅ Fine-tune only the custom head (low computational cost)
-- ✅ Inject both raw features AND TabPFN predictions into head (dual inputs)
+-  Keep TabPFN frozen (preserve pretrained knowledge)
+-  Fine-tune only the custom head (low computational cost)
+-  Inject both raw features AND TabPFN predictions into head (dual inputs)
 
 **Training Strategy**:
 - Batch size: 64 (from Step 7 optimization)
@@ -154,75 +154,5 @@ Greeks (Automatic Differentiation)
 - Final Sobolev loss: **0.009** (excellent convergence)
 - Validation MAE: **0.0285** (competitive with Step 7 baseline)
 
----
-
-## Phase 6: Comparative Analysis & Hedging Validation (Step 11)
-
-### Volatility Smile Accuracy
-
-| Metric | Step 4 (Baseline) | Step 9 (Hybrid) |
-|--------|---|---|
-| Smile smoothness | Jittery | **Smooth** ✅ |
-| Max price error | 0.30 | **0.28** |
-| RMSE | 0.012 | **0.009** |
-
-### Greeks Consistency (Critical for Hedging)
-
-**Skew (dV/dK)**:
-- Step 4: High-frequency noise (unsuitable for hedging)
-- Step 9: **Perfectly smooth Sobolev curve** ✅
-
-**Vanna (d²V/dK·dα)**:
-- Step 4: Numerical instability
-- Step 9: **Mathematically coherent** ✅
-
-### Robustness Across Parameter Ranges
-
-Stress tests confirm the model remains physically coherent across extreme strikes and parameter ranges.
-
----
-
-## Key Innovations
-
-| Innovation | Benefit | Status |
-|-----------|---------|--------|
-| **Sobolev Loss** | Smooth Greeks | ✅ Implemented |
-| **Ray Tune Optimization** | Optimal architecture | ✅ Completed |
-| **Hybrid Stacking** | Robustness + accuracy | ✅ Validated |
-| **SCM Synthetic Data** | Causal understanding | ✅ Deployed |
-| **Pre-cached Predictions** | Fast training | ✅ Optimized |
-
----
-
-## Technical Stack
-
-- **Framework**: PyTorch 2.0+
-- **Hyperparameter Tuning**: Ray Tune
-- **Pretrained Model**: TabPFN (Anthropic/Prior Labs)
-- **Loss Function**: Custom Sobolev (automatic differentiation)
-- **Optimization**: Adam with learning rate scheduling
-- **Data**: 5,000 SABR + 6,400 synthetic samples
-
----
-
-## Results Summary
-
-| Step | Method | Val MAE | Use Case |
-|------|--------|---------|----------|
-| **4** | TabPFN (baseline) | 0.0405 | Noisy baseline |
-| **7** | Custom MLP (optimized) | **0.0302** | Fast, accurate |
-| **8** | TabPFN + Head (hybrid) | 0.0328 | Robust hybrid |
-| **9** | TabPFN + Synthetic + Sobolev | 0.0285 | **Best overall** |
-
-
----
-
-## Future Improvements
-
-1. **Multi-model ensemble** (Step 7 + Step 9) for robustness
-2. **Real-time fine-tuning** on live market data
-3. **Uncertainty quantification** (Bayesian posterior over Greeks)
-4. **GPU acceleration** for faster convergence
-5. **Advanced SCM structures** (non-linear causal mechanisms)
 
 ---
