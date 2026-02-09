@@ -35,7 +35,7 @@ def train():
 
     pfn_priors = []
     chunk_size = 1000 
-    for i in tqdm(range(0, len(X_r), chunk_size), desc="Inférence Prior"):
+    for i in tqdm(range(0, len(X_r), chunk_size), desc="Inference Prior"):
         chunk = X_r[i:i+chunk_size]
         pfn_priors.append(tabpfn.predict(chunk).reshape(-1, 1))
     X_pfn = np.vstack(pfn_priors)
@@ -62,7 +62,7 @@ def train():
     for epoch in range(100):
         model.train()
         train_loss = 0
-        pbar = tqdm(train_loader, desc=f"Époque {epoch+1}/100", leave=False)
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/100", leave=False)
         
         for b_raw, b_pfn, b_y in pbar:
             b_raw, b_pfn, b_y = b_raw.to(device), b_pfn.to(device), b_y.to(device)
