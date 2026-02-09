@@ -140,7 +140,7 @@ class TabPFNWithCustomHead(nn.Module):
         """Forward: TabPFN (frozen) → custom head"""
         with torch.no_grad():
             tabpfn_pred = torch.FloatTensor(
-                self.tabpfn.predict(x.cpu().numpy()).reshape(-1, 1)
+                self.tabpfn.predict(x.cuda().numpy()).reshape(-1, 1)
             ).to(x.device)
         
         return self.custom_head(tabpfn_pred)
@@ -181,7 +181,7 @@ def fine_tune_with_synthetic_data(
     
     # ============ FIT TABPFN ON REAL DATA ============
     print(f"\n🎓 Fitting TabPFN on real data...")
-    tabpfn = TabPFNRegressor(device='cpu', n_estimators=32,ignore_pretraining_limits=True)
+    tabpfn = TabPFNRegressor(device='cuda', n_estimators=32,ignore_pretraining_limits=True)
     tabpfn.fit(X_real, y_real[:, 0])  # Fit on volatility
     print(f"✅ TabPFN fitted!")
     
