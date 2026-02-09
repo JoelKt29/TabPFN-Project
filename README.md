@@ -4,7 +4,7 @@ markdown
 
 ## Project Overview
 
-This project tackles the challenge of modeling the SABR (Sigma-Alpha-Beta-Rho) stochastic volatility model using Deep Learning. The innovation lies in combining TabPFN (a pretrained Transformer for tabular data) with Sobolev training to produce smooth volatility smiles and mathematically consistent Greeks (sensitivities), essential for professional risk management.
+This project tackles the challenge of modeling the SABR (Sigma-Alpha-Beta-Rho) stochastic volatility model using the transformer TabPFN. The innovation lies in combining TabPFN  with a custom loss function to produce smooth volatility smiles and mathematically consistent Greeks (sensitivities), essential for professional risk management.
 
 ---
 
