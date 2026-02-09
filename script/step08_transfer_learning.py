@@ -5,7 +5,7 @@ import pandas as pd
 import json
 import numpy as np
 from tabpfn import TabPFNRegressor
-from script.step06_loss_with_derivatives import DerivativeLoss
+from step06_loss_with_derivatives import DerivativeLoss
 
 current_dir = Path(__file__).resolve().parent
 data_dir = current_dir.parent / "data"
