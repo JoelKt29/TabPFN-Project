@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import json
 from pathlib import Path
 from tabpfn import TabPFNRegressor
-from step08_stacking_logic import TabPFNStackingModel
+from step08_transfer_learning import TabPFNStackingModel
 
 current_dir = Path(__file__).resolve().parent
 project_root = current_dir.parent 
