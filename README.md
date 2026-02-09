@@ -29,19 +29,14 @@ This project tackles the challenge of modeling the SABR (Sigma-Alpha-Beta-Rho) s
 
 **Objective**: Enforce mathematical consistency between volatility and its derivatives.
 
-**Innovation - Sobolev Loss**:
+**Innovation - Custom Loss with derivatives**:
 Instead of standard MSE on prices alone, we optimize both the price AND its derivatives:
 
-$$\mathcal{L}_{Sobolev} = \lambda_1 \|V_{pred} - V_{true}\|^2 + \lambda_2 \|\nabla V_{pred} - \nabla V_{true}\|^2$$
+$$\mathcal{L}_{Sobolev} = \lambda_1 \|V_{pred} - V_{true}\| + \lambda_2 \|\nabla V_{pred} - \nabla V_{true}\|
 
 where:
 - $V$ = predicted volatility
 - $\nabla V$ = derivatives w.r.t. SABR parameters (Alpha, Beta, Rho, VolVol, Strike)
-
-**Why This Works**:
-- Enforces smooth, continuous derivatives across the volatility surface
-- Prevents "arbitrage opportunities" from discontinuous Greeks
-- Guarantees hedge ratios remain stable across strikes
 
 **Implementation**:
 - Custom `DerivativeLoss` class in Step 6
@@ -75,11 +70,6 @@ where:
   "derivative_weight": 0.653
 }
 ```
-
-**Why Swish Activation?**
-- Continuously differentiable: $\text{Swish}(x) = x \cdot \sigma(x)$
-- Smooth second derivatives essential for Sobolev training
-- Outperformed ReLU by **2%** in validation MAE
 
 **Result**: Best validation MAE = **0.03021** on pure MLP baseline.
 
@@ -124,35 +114,6 @@ Input SABR Parameters (8 dims)
 
 We generate realistic SABR scenarios via a causal mechanism:
 
-```
-Latent Market Factors
-├── z_market_level ∈ [-1, 1]
-├── z_vol_regime ∈ [0.1, 2.0]
-├── z_smile_strength ∈ [0, 1]
-└── z_rate_level ∈ [-2, 2]
-         ↓
-SABR Parameters (Causal Functions)
-├── β = 0.4 + 0.3(z_market / 2) + noise
-├── ρ = -0.5 + 0.3(z_vol_regime / 2) + noise
-├── volvol = 0.3 + 0.4·z_smile + noise
-└── α = 0.05 + 0.2·z_vol_regime + noise
-         ↓
-Volatility Surface (Hagan Formula)
-└── σ_SABR = α / [(F·K)^((1-β)/2) · (1 + ...)]
-         ↓
-Greeks (Automatic Differentiation)
-├── dV/dα, dV/dβ, dV/dρ, dV/dvolvol, dV/dF, dV/dK
-```
-
-**Data Synthesis**:
-- Generated **6,400** synthetic samples (100 batches × 64 samples)
-- Combined with **5,000** real SABR data points
-- Total training set: **10,400** diverse scenarios
-
-**Performance**:
-- Training converged in **5 epochs** (with pre-computed TabPFN predictions)
-- Final Sobolev loss: **0.009** (excellent convergence)
-- Validation MAE: **0.0285** (competitive with Step 7 baseline)
 
 
 ---
