@@ -52,7 +52,7 @@ def show_tabpfn_derivative_noise():
 
         
     graph_dir = current_dir.parent / "graph"
-    save_path = graph_dir / "step4_performance_scatter.png"
+    save_path = graph_dir / "derivatives_not_working.png"
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.show()
 
