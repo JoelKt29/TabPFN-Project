@@ -23,7 +23,7 @@ while count < MAX_SAMPLES:
     rho = np.random.uniform(-0.25, 0.25)
     volvol = np.random.uniform(0.15, 0.25)
     v_atm_n = np.random.uniform(0.005, 0.02)
-    f = np.random.uniform(0.01, 0.50)
+    f = np.random.uniform(0.01, 0.05)
     k = f * np.random.uniform(0.75, 1.5)
 
     sabr = Hagan2002LognormalSABR(

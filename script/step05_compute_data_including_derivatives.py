@@ -76,7 +76,7 @@ def fast_generate_sabr(num_samples=5000, num_strikes=8):
     configs = []
     for _ in range(num_configs):
         configs.append((
-            np.random.uniform(0.01, 0.50), # f
+            np.random.uniform(0.01, 0.05), # f
             np.random.uniform(0.25, 0.99), # beta
             np.random.uniform(-0.25, 0.25),# rho
             np.random.uniform(0.15, 0.25), # volvol
