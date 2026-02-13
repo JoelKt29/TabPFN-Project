@@ -11,7 +11,7 @@ import ray
 from ray import tune, train
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.search.optuna import OptunaSearch
-from script.step06_loss_with_derivatives import DerivativeLoss
+from step06_loss_with_derivatives import DerivativeLoss
 import sys
 from pathlib import Path
 from sklearn.model_selection import train_test_split
@@ -174,7 +174,7 @@ def train_model_ray(config: dict):
                             dropout=config.get("dropout", 0.1),activation=config["activation"] )
         else:
             model = TabularTransformer(input_dim=X.shape[1],output_dim=output_dim,d_model=config["d_model"],
-                nhead=config["nhead"],num_layers=config["num_layers"],im_feedforward=config["dim_feedforward"],
+                nhead=config["nhead"],num_layers=config["num_layers"],dim_feedforward=config["dim_feedforward"],
                 dropout=config.get("dropout", 0.1),activation=config["activation"])
     elif config["model_type"] == "mlp":
         model = DeepMLP(input_dim=X.shape[1],output_dim=output_dim,hidden_dims=config["hidden_dims"],
