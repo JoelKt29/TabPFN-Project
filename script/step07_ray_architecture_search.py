@@ -1,328 +1,126 @@
-import os
-os.environ['RAY_DEDUP_LOGS'] = '0'  # For a better logging arrangement
-import numpy as np
-import pandas as pd
+from pathlib import Path
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
+import pandas as pd
 import json
-from pathlib import Path
-import ray
-from ray import tune, train
-from ray.tune.schedulers import ASHAScheduler
-from ray.tune.search.optuna import OptunaSearch
-from step06_loss_with_derivatives import DerivativeLoss
-import sys
-from pathlib import Path
-from sklearn.model_selection import train_test_split
-
-
-if torch.cuda.is_available():
-    gpu = 1.0 
-    cpus = 2    
-else:
-    gpu = 0.0
-    cpus = os.cpu_count()
+import numpy as np
+from tabpfn import TabPFNRegressor
 
 current_dir = Path(__file__).resolve().parent
 data_dir = current_dir.parent / "data"
-script_dir = str(current_dir)
-if script_dir not in sys.path:
-    sys.path.append(script_dir)
+config_path = current_dir / "ray_results" / "best_config.json"
+device = 'cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu')
 
-
-
-class Swish(nn.Module):
-    def forward(self, x):
-        return x * torch.sigmoid(x)
-
-class Mish(nn.Module):
-    def forward(self, x):
-        return x * torch.tanh(nn.functional.softplus(x))
-
-
-def get_activation(name: str):
-    activations = {
-        'swish': Swish(),
-        'mish': Mish(),
-        'gelu': nn.GELU(),
-        'selu': nn.SELU(),}
-    return activations[name.lower()]
-
-
-
-class TabularTransformer(nn.Module):
-    """
-    Inspired by TabPFN architecture
-    """
-    
-    def __init__(
-        self,
-        input_dim: int=8,
-        output_dim: int = 7,           
-        d_model: int = 192,            
-        nhead: int = 4,                
-        num_layers: int = 12,           
-        dim_feedforward: int = 768,   
-        dropout: float = 0.0,          
-        activation: str = 'gelu'):
-
+# --- MODIFICATION 1: Adaptive Loss Weighting ---
+class AdaptiveDerivativeLoss(nn.Module):
+    def __init__(self, num_derivatives=6):
         super().__init__()
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.input_proj = nn.Linear(input_dim, d_model)
-        self.pos_encoding = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            activation=activation,
-            batch_first=True)
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        self.output_proj = nn.Sequential(nn.Linear(d_model, d_model // 2),
-            get_activation(activation), nn.Dropout(dropout),nn.Linear(d_model // 2, output_dim))
-        self._init_weights()
-    
-    def _init_weights(self):
-        for p in self.parameters():
-            if p.dim() > 1:
-                nn.init.xavier_uniform_(p)
-    
-    def forward(self, x):
-        batch_size = x.size(0)
-        x = self.input_proj(x)  
-        x = x.unsqueeze(1)  
-        x = x + self.pos_encoding
-        x = self.transformer(x)  
-        x = x.squeeze(1)  
-        x = self.output_proj(x) 
-        return x
+        self.log_vars = nn.Parameter(torch.zeros(1 + num_derivatives))
+        
+    def forward(self, pred_vol, true_vol, pred_derivs, true_derivs):
+        l1_vol = torch.mean(torch.abs(pred_vol - true_vol))
+        loss = torch.exp(-self.log_vars[0]) * l1_vol + self.log_vars[0]
+        
+        deriv_loss = 0.0
+        idx = 1
+        for key in pred_derivs.keys():
+            l1_deriv = torch.mean(torch.abs(pred_derivs[key] - true_derivs[key]))
+            loss += torch.exp(-self.log_vars[idx]) * l1_deriv + self.log_vars[idx]
+            deriv_loss += l1_deriv.item()
+            idx += 1
+            
+        return loss, deriv_loss
 
-
-
-class DeepMLP(nn.Module):    
-    def __init__(
-        self,
-        input_dim: int,
-        output_dim: int = 1,
-        hidden_dims: list = [512, 256, 128],
-        dropout: float = 0.1,
-        activation: str = 'gelu',
-        d_model : int = 0 ):
-
+class TabPFNStackingModel(nn.Module):
+    def __init__(self, config, n_outputs=7):
         super().__init__()
+        input_dim = 9  # 8 SABR features + 1 TabPFN raw prediction
         layers = []
         prev_dim = input_dim
-        for hidden_dim in hidden_dims:
-            layers.extend([nn.Linear(prev_dim, hidden_dim),nn.BatchNorm1d(hidden_dim),
-                get_activation(activation),nn.Dropout(dropout)])
-            prev_dim = hidden_dim
-        layers.append(nn.Linear(prev_dim, output_dim))
-        self.network = nn.Sequential(*layers)
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.kaiming_normal_(m.weight)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-    
-    def forward(self, x):
-        return self.network(x)
+        h_dims = config.get('hidden_dims', [512, 256, 128])
+        for h_dim in h_dims:
+            layers.extend([
+                nn.Linear(prev_dim, h_dim),
+                # --- MODIFICATION 4: Added LayerNorm for Stacking Model as well ---
+                nn.LayerNorm(h_dim),
+                nn.SiLU(),
+                nn.Dropout(config.get('dropout', 0.09))
+            ])
+            prev_dim = h_dim
+        
+        layers.append(nn.Linear(prev_dim, n_outputs))
+        self.head = nn.Sequential(*layers)
 
+    def forward(self, x_sabr, x_tabpfn):
+        combined = torch.cat([x_sabr, x_tabpfn], dim=1)
+        return self.head(combined)
 
-
-def train_model_ray(config: dict):
-    """
-    Training a model with an input configuration
-    """
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")    
-    raw_path = config.get('data_path',data_dir / 'sabr_with_derivatives_scaled.csv')
-    data_path = os.path.abspath(raw_path)
-    try:
-        df = pd.read_csv(data_path)
-    except FileNotFoundError:
-        df = pd.read_csv(raw_path)
-
-
-    
+def run_step8():
+    with open(config_path, "r") as f:
+        config = json.load(f)
+    csv_path = data_dir / "sabr_with_derivatives_scaled.csv"
+    df = pd.read_csv(csv_path)    
     feature_cols = ['beta', 'rho', 'volvol', 'v_atm_n', 'alpha', 'F', 'K', 'log_moneyness']
-    has_derivatives = 'dV_dbeta_scaled' in df.columns
-    if has_derivatives:
-        deriv_cols = [c for c in df.columns if c.endswith('_scaled') and c.startswith('dV_')]
-        output_dim = 1 + len(deriv_cols)  # volatility + derivatives
-    else:
-        output_dim = 1
-    X = df[feature_cols].values
-    if has_derivatives:
-        y_cols = ['volatility_scaled'] + deriv_cols
-        y = df[y_cols].values
-    else:
-        y = df['y_scaled'].values.reshape(-1, 1) if 'y_scaled' in df else df['volatility_output'].values.reshape(-1, 1)
+    target_cols = ['volatility_scaled', 'dV_dbeta_scaled', 'dV_drho_scaled', 
+                   'dV_dvolvol_scaled', 'dV_dvatm_scaled', 'dV_dF_scaled', 'dV_dK_scaled']
+    X_raw = df[feature_cols].values
+    y_raw = df[target_cols].values
 
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
-    train_dataset = TensorDataset(torch.FloatTensor(X_train), torch.FloatTensor(y_train))
-    val_dataset = TensorDataset(torch.FloatTensor(X_val), torch.FloatTensor(y_val))
-    train_loader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=config['batch_size'])
+    # Pre-train TabPFN context 
+    tabpfn = TabPFNRegressor(device=device, ignore_pretraining_limits=True)
+    train_idx = np.random.choice(len(df), 500, replace=False)
+    tabpfn.fit(X_raw[train_idx], y_raw[train_idx, 0])
+    tabpfn_preds = tabpfn.predict(X_raw).reshape(-1, 1)
 
+    X_sabr = torch.FloatTensor(X_raw)
+    X_tabpfn = torch.FloatTensor(tabpfn_preds)
+    Y = torch.FloatTensor(y_raw)
 
-    model = None
-    if config["model_type"] == "transformer":
-        # PyTorch Transformer only accepts relu and gelu
-        if config["activation"] not in ["gelu", "relu"]:
-            model = DeepMLP(input_dim=X.shape[1], output_dim=output_dim,hidden_dims=config["hidden_dims"], 
-                            dropout=config.get("dropout", 0.1),activation=config["activation"] )
-        else:
-            model = TabularTransformer(input_dim=X.shape[1],output_dim=output_dim,d_model=config["d_model"],
-                nhead=config["nhead"],num_layers=config["num_layers"],dim_feedforward=config["dim_feedforward"],
-                dropout=config.get("dropout", 0.1),activation=config["activation"])
-    elif config["model_type"] == "mlp":
-        model = DeepMLP(input_dim=X.shape[1],output_dim=output_dim,hidden_dims=config["hidden_dims"],
-            dropout=config.get("dropout", 0.1),activation=config["activation"])
-    model = model.to(device)
+    model = TabPFNStackingModel(config).to(device)
     
+    # Instantiate Adaptive Loss
+    criterion = AdaptiveDerivativeLoss(num_derivatives=6).to(device)
+    
+    # Combine model parameters and learnable loss weights for the optimizer
+    model_params = list(model.parameters()) + list(criterion.parameters())
 
-    if has_derivatives and config.get('use_derivative_loss', True):
-        criterion = DerivativeLoss(value_weight=1.0, derivative_weight=0.05)
+    opt_type = config.get('optimizer', 'adamw')
+    if opt_type == 'adam':
+        optimizer = torch.optim.Adam(model_params, lr=config.get('lr'))
     else:
-        criterion = nn.L1Loss()
+        optimizer = torch.optim.AdamW(model_params, lr=config.get('lr'), weight_decay=config.get('weight_decay'))
     
+    model.train()
+    batch_size = config.get('batch_size')
+    
+    for epoch in range(101):
+        permutation = torch.randperm(X_sabr.size(0))
+        epoch_loss = 0
+        for i in range(0, X_sabr.size(0), batch_size):
+            indices = permutation[i:i+batch_size]
+            bx_s, bx_t = X_sabr[indices].to(device), X_tabpfn[indices].to(device)
+            by = Y[indices].to(device)
 
-    if config['optimizer'] == 'adam':
-        optimizer = torch.optim.Adam(model.parameters(), lr=config['lr'])
-    if config['optimizer'] == 'adamw':
-        optimizer = torch.optim.AdamW(model.parameters(), lr=config['lr'], weight_decay=config.get('weight_decay', 1e-5))
-    
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
-    num_epochs = config.get('num_epochs', 50)
-    for epoch in range(num_epochs):
-        model.train()
-        train_loss = 0.0
-        for batch_X, batch_y in train_loader:
-            batch_X, batch_y = batch_X.to(device), batch_y.to(device)
             optimizer.zero_grad()
-            outputs = model(batch_X)
+            out = model(bx_s, bx_t)
             
-            if has_derivatives and config.get('use_derivative_loss', True):
-                pred_vol = outputs[:, 0:1]
-                true_vol = batch_y[:, 0:1]
-                pred_derivs = {f'deriv_{i}': outputs[:, i:i+1] for i in range(1, outputs.size(1))}
-                true_derivs = {f'deriv_{i}': batch_y[:, i:i+1] for i in range(1, batch_y.size(1))}
-                loss, _ = criterion(pred_vol, true_vol, pred_derivs, true_derivs)
-            else:
-                loss = criterion(outputs, batch_y)
+            # d1 to d6 correspond to the 6 derivatives 
+            pred_d = {f'd{j}': out[:, j:j+1] for j in range(1, 7)}
+            true_d = {f'd{j}': by[:, j:j+1] for j in range(1, 7)}
+            
+            loss, _ = criterion(out[:, 0:1], by[:, 0:1], pred_d, true_d)
             
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
-            train_loss += loss.item()
-        train_loss /= len(train_loader)
-        
-        model.eval()
-        val_loss = 0.0
-        val_mae = 0.0
-        
-        with torch.no_grad():
-            for batch_X, batch_y in val_loader:
-                batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-                outputs = model(batch_X)
-                if has_derivatives and config.get('use_derivative_loss', True):
-                    pred_vol = outputs[:, 0:1]
-                    true_vol = batch_y[:, 0:1]
-                    pred_derivs = {f'deriv_{i}': outputs[:, i:i+1] for i in range(1, outputs.size(1))}
-                    true_derivs = {f'deriv_{i}': batch_y[:, i:i+1] for i in range(1, batch_y.size(1))}
-                    loss, _ = criterion(pred_vol, true_vol, pred_derivs, true_derivs)
-                    mae = torch.mean(torch.abs(pred_vol - true_vol))
-                else:
-                    loss = criterion(outputs, batch_y)
-                    mae = torch.mean(torch.abs(outputs - batch_y))  
-                val_loss += loss.item()
-                val_mae += mae.item()
-        
-        val_loss /= len(val_loader)
-        val_mae /= len(val_loader)
-        scheduler.step(val_loss)
-        
-        tune.report({'train_loss': train_loss,'val_loss': val_loss,'val_mae': val_mae,'epoch': epoch})
+            epoch_loss += loss.item()
+            
+        if epoch % 10 == 0:
+            current_mae = torch.mean(torch.abs(out[:, 0:1] - by[:, 0:1])).item()
+            avg_loss = epoch_loss / (len(X_sabr) / batch_size)
+            print(f"Epoch {epoch:03d} | Sobolev Loss: {avg_loss:.6f} | Vol MAE: {current_mae:.6f}")
 
-
-def run_ray_tune_search(
-    data_path: str = data_dir / 'sabr_with_derivatives_scaled.csv',num_samples: int = 100,max_epochs: int = 50,
-    gpus_per_trial: float = gpu,output_dir: str = './ray_results'):
-    
-    
-    search_space = {'data_path': os.path.abspath(data_path),'model_type': tune.choice(['transformer', 'mlp']),
-        'activation': tune.choice(['swish', 'mish', 'gelu', 'selu']),  # All differentiable
-        
-        # Transformer-specific
-        'd_model': tune.choice([128, 256, 512]),
-        'nhead': tune.choice([4, 8]),
-        'num_layers': tune.choice([2, 3, 4, 6]),
-        'dim_feedforward': tune.choice([512, 1024, 2048]),
-        
-        # MLP-specific
-        'hidden_dims': tune.choice([(512, 256, 128), (256, 128, 64)]),
-        
-        'batch_size': tune.choice([32, 64, 128]),
-        'lr': tune.loguniform(1e-5, 1e-2),
-        'dropout': tune.uniform(0.0, 0.3),
-        'optimizer': tune.choice(['adam', 'adamw']),
-        'weight_decay': tune.loguniform(1e-6, 1e-3),
-        'num_epochs': max_epochs,
-        'use_derivative_loss':True,
-        'value_weight': tune.uniform(0.5, 1.5),
-        'derivative_weight': tune.uniform(0.1, 1.0),}
-    
-    scheduler = ASHAScheduler(time_attr='epoch',metric='val_loss',mode='min',
-        max_t=max_epochs,grace_period=20,reduction_factor=2,)
-    search_alg = OptunaSearch(metric='val_loss',mode='min',)
-    
-    print("="*80)
-    print("STARTING RAY TUNE ARCHITECTURE SEARCH")
-    print("="*80)
-    
-
-    ray.init(ignore_reinit_error=True)
-    tuner = tune.Tuner(tune.with_resources(train_model_ray,resources={"cpu": cpus, "gpu": gpu}),
-        tune_config=tune.TuneConfig(scheduler=scheduler,search_alg=search_alg,num_samples=num_samples,),
-        param_space=search_space,)
-    results = tuner.fit()
-    
-    best_result = results.get_best_result(metric="val_loss", mode="min")
-    
-
-    print(f"Best MAE: {best_result.metrics['val_mae']:.8f}")
-    print(f"\nBest configuration:")
-    for key, value in sorted(best_result.config.items()):
-        if not key.startswith('_'):
-            print(f"  {key}: {value}")
-    
-    best_config_path = Path(output_dir) / 'best_config.json'
-    best_config_path.parent.mkdir(parents=True, exist_ok=True)
-    best_config_to_save = best_result.config.copy()
-    best_config_to_save['best_mae'] = float(best_result.metrics['val_mae'])
-    with open(best_config_path, 'w') as f:
-        json.dump(best_result.config, f, indent=2)
-    return results, best_result
-
+    save_path = current_dir / "tabpfn_sabr_step8_stacking.pth"
+    torch.save(model.state_dict(), save_path)
 
 if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='Ray Tune architecture search')
-    parser.add_argument('--data', type=str, default=data_dir / 'sabr_with_derivatives_scaled.csv')
-    parser.add_argument('--samples', type=int, default=100)
-    parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--gpus', type=float, default=gpu,)
-    parser.add_argument('--output', type=str, default='./ray_results')
-    
-    args = parser.parse_args()
-    
-    results, best_result = run_ray_tune_search(
-        data_path=args.data,
-        num_samples=args.samples,
-        max_epochs=args.epochs,
-        gpus_per_trial=args.gpus,
-        output_dir=args.output)
-    
-    print("\n Ray Tune search completed")
+    run_step8()
