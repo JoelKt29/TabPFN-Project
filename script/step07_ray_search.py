@@ -136,7 +136,7 @@ def train_model_ray(config: dict):
     Training a model with an input configuration
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")    
-    raw_path = config.get('data_path',data_dir / 'sabr_with_derivatives_scaled.csv')
+    raw_path = config.get('data_path',data_dir / 'sabr_adaptive_dataset.csv')
     data_path = os.path.abspath(raw_path)
     try:
         df = pd.read_csv(data_path)
@@ -174,8 +174,8 @@ def train_model_ray(config: dict):
                             dropout=config.get("dropout", 0.1),activation=config["activation"] )
         else:
             model = TabularTransformer(input_dim=X.shape[1],output_dim=output_dim,d_model=config["d_model"],
-                nhead=config["nhead"],num_layers=config["num_layers"],im_feedforward=config["dim_feedforward"],
-                dropout=config.get("dropout", 0.1),activation=config["activation"])
+    nhead=config["nhead"],num_layers=config["num_layers"],dim_feedforward=config["dim_feedforward"],
+    dropout=config.get("dropout", 0.1),activation=config["activation"])
     elif config["model_type"] == "mlp":
         model = DeepMLP(input_dim=X.shape[1],output_dim=output_dim,hidden_dims=config["hidden_dims"],
             dropout=config.get("dropout", 0.1),activation=config["activation"])
@@ -245,8 +245,7 @@ def train_model_ray(config: dict):
         val_mae /= len(val_loader)
         scheduler.step(val_loss)
         
-        train.report({'train_loss': train_loss,'val_loss': val_loss,'val_mae': val_mae,'epoch': epoch})
-
+        tune.report({'train_loss': train_loss,'val_loss': val_loss,'val_mae': val_mae,'epoch': epoch})
 
 def run_ray_tune_search(
     data_path: str = data_dir / 'sabr_with_derivatives_scaled.csv',num_samples: int = 100,max_epochs: int = 50,
