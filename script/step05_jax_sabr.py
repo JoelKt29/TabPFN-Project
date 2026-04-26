@@ -56,32 +56,31 @@ def sabr_vol_hagan(K, F, T, alpha, beta, rho, volvol):
 # =====================================================================
 
 # 1. On crée d'abord l'opérateur mathématique pur (pour un seul point scalaire)
-sabr_val_and_grad_scalar = jax.value_and_grad(sabr_vol_hagan, argnums=(0, 1, 2, 3, 4, 5, 6))
 
 # 2. On vectorise (vmap) cet opérateur pour qu'il accepte des tableaux de 200 points
-sabr_val_and_grad_vectorized = jax.vmap(sabr_val_and_grad_scalar)
+sabr_vectorized = jax.vmap(sabr_vol_hagan, in_axes=(0, None, None, None, None, None, None))
 
+
+def _sabr_sum(K, F, T, alpha, beta, rho, volvol):
+    return jnp.sum(sabr_vectorized(K, F, T, alpha, beta, rho, volvol))
+
+sabr_val_and_grad_vectorized = jax.value_and_grad(_sabr_sum, argnums=(0, 1, 2, 3, 4, 5, 6))
 # 3. On compile le tout (jit) pour que ça s'exécute à la vitesse de la lumière
 @jax.jit
 def compute_sabr_with_jax(K, F, T, alpha, beta, rho, volvol):
-    """
-    Prend des arrays (listes) de paramètres et renvoie instantanément 
-    la volatilité ET toutes les dérivées exactes (les Greeks).
-    """
-    # jax.value_and_grad renvoie un tuple : (Valeur_de_la_fonction, Tuple_des_dérivées)
-    vol, grads = sabr_val_and_grad_vectorized(K, F, T, alpha, beta, rho, volvol)
-    
-    # On range proprement les dérivées dans un dictionnaire
+    K = jnp.atleast_1d(jnp.asarray(K, dtype=jnp.float32))
+    _, grads = sabr_val_and_grad_vectorized(K, F, T, alpha, beta, rho, volvol)
+    vol = sabr_vectorized(K, F, T, alpha, beta, rho, volvol)  # vols réels
+
     grad_dict = {
-        'dV_dK': grads[0],        # Le Skew
-        'dV_dF': grads[1],        # Le Delta
-        'dV_dT': grads[2],        # Le Theta
-        'dV_dalpha': grads[3],    # Le Vega (par rapport à alpha)
-        'dV_dbeta': grads[4],
-        'dV_drho': grads[5],
-        'dV_dvolvol': grads[6]    # La sensibilité au Volvol
+        'dV_dK':     grads[0],
+        'dV_dF':     grads[1],
+        'dV_dT':     grads[2],
+        'dV_dalpha': grads[3],
+        'dV_dbeta':  grads[4],
+        'dV_drho':   grads[5],
+        'dV_dvolvol':grads[6],
     }
-    
     return vol, grad_dict
 
 # --- Petit bloc de test rapide ---

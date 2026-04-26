@@ -47,4 +47,4 @@ if __name__ == "__main__":
     
     print("\n--- Loss Test Results ---")
     for key, value in breakdown.items():
-        print(f"{key:20}: {value:.2f}")
+        print(f"{key:20}: {value:.6f}")
