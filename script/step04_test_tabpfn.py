@@ -23,7 +23,7 @@ X = df.drop(columns=['SABR_volatility'])
 y = df['SABR_volatility'].values.flatten()
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
 device = 'cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu')
-regressor = TabPFNRegressor(device=device, ignore_pretraining_limits=True)
+regressor = TabPFNRegressor(device='cpu', ignore_pretraining_limits=True)
 regressor.fit(X_train, y_train)
 predictions_scaled = regressor.predict(X_test)
 
