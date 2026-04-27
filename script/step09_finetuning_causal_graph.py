@@ -49,7 +49,7 @@ def train():
     
     tabpfn = TabPFNRegressor(device='cuda' if torch.cuda.is_available() else 'cpu', 
                              n_estimators=32, ignore_pretraining_limits=True)
-    ctx_size = min(len(X_r), 10000)
+    ctx_size = min(len(X_r), 4000)
     idx = np.random.choice(len(X_r), ctx_size, replace=False)
     tabpfn.fit(X_r[idx], Y_r[idx, 0])
 

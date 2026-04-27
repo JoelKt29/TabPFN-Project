@@ -55,21 +55,21 @@ def sabr_vol_hagan(K, F, T, alpha, beta, rho, volvol):
 # WRAPPER JAX : VMAP (Vectorisation) et JIT (Compilation) + GRADIENTS
 # =====================================================================
 
-# 1. On crée d'abord l'opérateur mathématique pur (pour un seul point scalaire)
-
-# 2. On vectorise (vmap) cet opérateur pour qu'il accepte des tableaux de 200 points
-sabr_vectorized = jax.vmap(sabr_vol_hagan, in_axes=(0, None, None, None, None, None, None))
-
+# On vectorise sur TOUS les axes (0, 0, 0, 0, 0, 0, 0) pour traiter chaque ligne du CSV
+sabr_vectorized = jax.vmap(sabr_vol_hagan, in_axes=(0, 0, 0, 0, 0, 0, 0))
 
 def _sabr_sum(K, F, T, alpha, beta, rho, volvol):
     return jnp.sum(sabr_vectorized(K, F, T, alpha, beta, rho, volvol))
 
-sabr_val_and_grad_vectorized = jax.value_and_grad(_sabr_sum, argnums=(0, 1, 2, 3, 4, 5, 6))
+# Calcule les gradients individuels pour chaque point
+sabr_grad_func = jax.grad(_sabr_sum, argnums=(0, 1, 2, 3, 4, 5, 6))
+
+
 # 3. On compile le tout (jit) pour que ça s'exécute à la vitesse de la lumière
 @jax.jit
 def compute_sabr_with_jax(K, F, T, alpha, beta, rho, volvol):
     K = jnp.atleast_1d(jnp.asarray(K, dtype=jnp.float32))
-    _, grads = sabr_val_and_grad_vectorized(K, F, T, alpha, beta, rho, volvol)
+    _, grads = sabr_vectorized(K, F, T, alpha, beta, rho, volvol)
     vol = sabr_vectorized(K, F, T, alpha, beta, rho, volvol)  # vols réels
 
     grad_dict = {
@@ -83,22 +83,49 @@ def compute_sabr_with_jax(K, F, T, alpha, beta, rho, volvol):
     }
     return vol, grad_dict
 
-# --- Petit bloc de test rapide ---
+
+
 if __name__ == "__main__":
     import numpy as np
+    import pandas as pd
+    from pathlib import Path
+
+    # Chemins
+    data_dir = Path(__file__).resolve().parent.parent / "data"
+    input_path = data_dir / "sabr_hybrid_mesh_features.csv"
+    output_path = data_dir / "sabr_hybrid_mesh_with_derivatives.csv"
+
+    print(f"📂 Chargement du mesh hybride : {input_path.name}")
+    df = pd.read_csv(input_path)
+
+    # Conversion des colonnes en tableaux JAX (float32 pour la rapidité)
+    K = jnp.array(df['K'].values, dtype=jnp.float32)
+    F = jnp.array(df['F'].values, dtype=jnp.float32)
+    T = jnp.ones_like(K) * 1.0  # On fixe T=1.0 si pas dans le CSV
+    alpha = jnp.array(df['alpha'].values, dtype=jnp.float32)
+    beta = jnp.array(df['beta'].values, dtype=jnp.float32)
+    rho = jnp.array(df['rho'].values, dtype=jnp.float32)
+    volvol = jnp.array(df['volvol'].values, dtype=jnp.float32)
+
+    print(f"🚀 Calcul JAX sur {len(df)} points (Vols + 6 Gradients)...")
     
-    # Simulation de 3 scénarios de marché
-    K = jnp.array([0.04, 0.05, 0.06])
-    F = jnp.array([0.05, 0.05, 0.05])
-    T = jnp.array([1.0, 1.0, 1.0])
-    alpha = jnp.array([0.03, 0.03, 0.03])
-    beta = jnp.array([0.5, 0.5, 0.5])
-    rho = jnp.array([-0.2, -0.2, -0.2])
-    volvol = jnp.array([0.4, 0.4, 0.4])
+    # Calcul de la Volatilité
+    vols = sabr_vectorized(K, F, T, alpha, beta, rho, volvol)
     
-    print("🚀 Test du moteur JAX vectorisé...")
-    vols, grads = compute_sabr_with_jax(K, F, T, alpha, beta, rho, volvol)
-    
-    print(f"\n✅ Volatilités calculées : {np.array(vols)}")
-    print(f"✅ Skew (dV/dK) calculé : {np.array(grads['dV_dK'])}")
-    print("\nSi des chiffres s'affichent, le moteur est opérationnel pour le graphique !")
+    # Calcul des Gradients (Greeks)
+    # Note : jax.grad de la somme renvoie les gradients de chaque élément
+    grads = jax.grad(_sabr_sum, argnums=(0, 1, 3, 4, 5, 6))(K, F, T, alpha, beta, rho, volvol)
+
+    # 3. On ajoute les résultats au DataFrame
+    df['volatility'] = np.array(vols)
+    df['dV_dK']      = np.array(grads[0])
+    df['dV_dF']      = np.array(grads[1])
+    df['dV_dalpha']  = np.array(grads[2])
+    df['dV_dbeta']   = np.array(grads[3])
+    df['dV_drho']    = np.array(grads[4])
+    df['dV_dvolvol'] = np.array(grads[5])
+
+    # Sauvegarde pour l'étape suivante (Standardization)
+    df.to_csv(output_path, index=False)
+    print(f"✅ Terminé ! Fichier sauvegardé : {output_path.name}")
+    print(df[['volatility', 'dV_dK', 'dV_drho']].head())

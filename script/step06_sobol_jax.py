@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from step02_hagan_2002_lognormal_sabr import Hagan2002LognormalSABR # Keep for alpha root finding
-from script.step05_jax_sabr import compute_sabr_with_jax # New JAX engine
+from step05_jax_sabr import compute_sabr_with_jax # New JAX engine
 from sklearn.preprocessing import MinMaxScaler
 import json
 from tqdm import tqdm

@@ -29,7 +29,7 @@ data_dir = current_dir.parent / "data"
 script_dir = str(current_dir)
 if script_dir not in sys.path:
     sys.path.append(script_dir)
-
+output_dir = current_dir / "ray_results"
 
 
 class Swish(nn.Module):
@@ -136,7 +136,7 @@ def train_model_ray(config: dict):
     Training a model with an input configuration
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")    
-    raw_path = config.get('data_path',data_dir / 'sabr_adaptive_dataset.csv')
+    raw_path = config.get('data_path', data_dir / 'sabr_hybrid_mesh_scaled.csv')
     data_path = os.path.abspath(raw_path)
     try:
         df = pd.read_csv(data_path)
@@ -247,9 +247,8 @@ def train_model_ray(config: dict):
         
         tune.report({'train_loss': train_loss,'val_loss': val_loss,'val_mae': val_mae,'epoch': epoch})
 
-def run_ray_tune_search(
-    data_path: str = data_dir / 'sabr_with_derivatives_scaled.csv',num_samples: int = 100,max_epochs: int = 50,
-    gpus_per_trial: float = gpu,output_dir: str = './ray_results'):
+def run_ray_tune_search(data_path: str = data_dir / 'sabr_hybrid_mesh_scaled.csv',num_samples: int = 100,max_epochs: int = 50,
+    gpus_per_trial: float = gpu,output_dir: Path = current_dir/'ray_results'):
     
     
     search_space = {'data_path': os.path.abspath(data_path),'model_type': tune.choice(['transformer', 'mlp']),
@@ -298,7 +297,13 @@ def run_ray_tune_search(
         if not key.startswith('_'):
             print(f"  {key}: {value}")
     
-    best_config_path = Path(output_dir) / 'best_config.json'
+    output_dir = Path(output_dir)
+
+# si output_dir est relatif → le rendre relatif au script
+    if not output_dir.is_absolute():
+        output_dir = current_dir / output_dir
+
+    best_config_path = output_dir / 'best_config.json'
     best_config_path.parent.mkdir(parents=True, exist_ok=True)
     best_config_to_save = best_result.config.copy()
     best_config_to_save['best_mae'] = float(best_result.metrics['val_mae'])
@@ -311,7 +316,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description='Ray Tune architecture search')
-    parser.add_argument('--data', type=str, default=data_dir / 'sabr_with_derivatives_scaled.csv')
+    parser.add_argument('--data', type=str, default=data_dir / 'sabr_hybrid_mesh_scaled.csv')   
     parser.add_argument('--samples', type=int, default=100)
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--gpus', type=float, default=gpu,)
