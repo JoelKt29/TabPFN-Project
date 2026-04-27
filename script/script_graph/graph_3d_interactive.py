@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from tabpfn import TabPFNRegressor
-from step02_hagan_2002_lognormal_sabr import Hagan2002LognormalSABR
+from script.true_step02_hagan_2002_lognormal_sabr import Hagan2002LognormalSABR
 import warnings
 import os
 

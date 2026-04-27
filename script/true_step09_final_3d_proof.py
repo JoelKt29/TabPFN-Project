@@ -6,12 +6,12 @@ import json
 import sys
 from pathlib import Path
 from tabpfn import TabPFNRegressor
-from step02_hagan_2002_lognormal_sabr import Hagan2002LognormalSABR
+from script.true_step02_hagan_2002_lognormal_sabr import Hagan2002LognormalSABR
 
 # Import dynamique
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir))
-from step08_transfer_learning import TabPFNStackingModel
+from script.step08_transfer_learning import TabPFNStackingModel
 
 # Chemins
 data_dir = current_dir.parent / "data"

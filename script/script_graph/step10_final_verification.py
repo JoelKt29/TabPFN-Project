@@ -11,7 +11,7 @@ from tabpfn import TabPFNRegressor
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir))
 
-from step08_transfer_learning import TabPFNStackingModel
+from script.step08_transfer_learning import TabPFNStackingModel
 
 # --- Configuration Paths ---
 data_dir = current_dir.parent / "data"

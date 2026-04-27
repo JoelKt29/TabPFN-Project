@@ -56,21 +56,21 @@ def sabr_vol_hagan(K, F, T, alpha, beta, rho, volvol):
 # =====================================================================
 
 # On vectorise sur TOUS les axes (0, 0, 0, 0, 0, 0, 0) pour traiter chaque ligne du CSV
+# 1. On s'assure que la vectorisation accepte bien des tableaux (arrays) sur tous les axes
 sabr_vectorized = jax.vmap(sabr_vol_hagan, in_axes=(0, 0, 0, 0, 0, 0, 0))
 
 def _sabr_sum(K, F, T, alpha, beta, rho, volvol):
     return jnp.sum(sabr_vectorized(K, F, T, alpha, beta, rho, volvol))
 
-# Calcule les gradients individuels pour chaque point
-sabr_grad_func = jax.grad(_sabr_sum, argnums=(0, 1, 2, 3, 4, 5, 6))
-
-
-# 3. On compile le tout (jit) pour que ça s'exécute à la vitesse de la lumière
 @jax.jit
 def compute_sabr_with_jax(K, F, T, alpha, beta, rho, volvol):
     K = jnp.atleast_1d(jnp.asarray(K, dtype=jnp.float32))
-    _, grads = sabr_vectorized(K, F, T, alpha, beta, rho, volvol)
-    vol = sabr_vectorized(K, F, T, alpha, beta, rho, volvol)  # vols réels
+    
+    # 1. Calcul de la volatilité pure
+    vol = sabr_vectorized(K, F, T, alpha, beta, rho, volvol)
+    
+    # 2. Calcul des gradients exacts avec la différenciation automatique
+    grads = jax.grad(_sabr_sum, argnums=(0, 1, 2, 3, 4, 5, 6))(K, F, T, alpha, beta, rho, volvol)
 
     grad_dict = {
         'dV_dK':     grads[0],
@@ -81,6 +81,7 @@ def compute_sabr_with_jax(K, F, T, alpha, beta, rho, volvol):
         'dV_drho':   grads[5],
         'dV_dvolvol':grads[6],
     }
+    
     return vol, grad_dict
 
 

@@ -8,7 +8,7 @@ from tabpfn import TabPFNRegressor
 import jax.numpy as jnp
 
 # IMPORT DU MOTEUR JAX
-from script.step05_jax_sabr import compute_sabr_with_jax
+from step05_jax_sabr import compute_sabr_with_jax
 
 current_dir = Path(__file__).resolve().parent
 data_dir = current_dir.parent / "data"
