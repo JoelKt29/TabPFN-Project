@@ -1,119 +1,116 @@
-markdown
+# SABR Volatility Surface Calibration via TabPFN & Neural Network Stacking
 
-# Structural Causal Modeling of SABR Volatility via TabPFN and Sobolev Training
-
-## Project Overview
-
-This project tackles the challenge of modeling the SABR (Sigma-Alpha-Beta-Rho) stochastic volatility model using the transformer TabPFN. The innovation lies in combining TabPFN  with a custom loss function to produce smooth volatility smiles and mathematically consistent Greeks (sensitivities), essential for professional risk management.
-
----
-
-## Phase 1: Baseline Comparison - SABR vs. TabPFN (Step 4)
-
-**Objective**: Evaluate TabPFN's out-of-the-box performance on synthetic SABR data.
-
-**Approach**:
-- Used TabPFN as a direct point estimator for volatility prediction from SABR parameters
-- Compared predicted surfaces with theoretical SABR formulas
-
-**Key Findings**:
--  TabPFN captures the general shape of the volatility smile
--  Produces "jittery" predictions (high-frequency noise)
--  Numerical gradient computation (Skew = dV/dK) exhibits extreme noise, rendering the model unsuitable for stable hedging
-
-**Verdict**: Baseline TabPFN is too noisy for real-world risk applications.
+![Project Status](https://img.shields.io/badge/Status-Completed-success)
+![Python Version](https://img.shields.io/badge/Python-3.10%2B-blue)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-ee4c2c)
+![JAX](https://img.shields.io/badge/JAX-Enabled-purple)
 
 ---
 
-## Phase 2: Custom Loss Function for Greeks (Steps 5 & 6)
+## 📌 Overview
 
-**Objective**: Enforce mathematical consistency between volatility and its derivatives.
+This repository presents an advanced machine learning approach to calibrate the **SABR volatility surface**. The project leverages **TabPFN** (a powerful In-Context Learning model) as a baseline and significantly enhances its performance—specifically its geometric stability and derivative accuracy—through **Neural Network Stacking** and a **Sobolev Loss function**.
 
-**Innovation - Custom Loss with derivatives**:
-Instead of standard MSE on prices alone, we optimize both the price AND its derivatives:
-
-$$\mathcal{L}_{Sobolev} = \lambda_1 \|V_{pred} - V_{true}\| + \lambda_2 \|\nabla V_{pred} - \nabla V_{true}\|
-
-where:
-- $V$ = predicted volatility
-- $\nabla V$ = derivatives w.r.t. SABR parameters (Alpha, Beta, Rho, VolVol, Strike)
-
-**Implementation**:
-- Custom `DerivativeLoss` class in Step 6
-- Computes automatic differentiation through the network
-- Weight balance: $\lambda_1 = 1.23$, $\lambda_2 = 0.45$ (from Step 7 optimization)
+The primary goal is to reconstruct an **arbitrage-free, smooth volatility surface** with highly accurate Greeks (derivatives like $\partial V/\partial K$), overcoming the numerical instability typically associated with tree-based or pure In-Context Learning models.
 
 ---
 
-## Phase 3: Hyperparameter Search with Ray Tune (Step 7)
+## 🚀 Key Innovations
 
-**Objective**: Find the optimal architecture for the custom volatility head.
+### 1. Hybrid Data Generation (Sobol + ATM Refinement)
 
-**Search Space**:
-- Hidden layer dimensions: [256, 512] × [128, 256] × [64, 128]
-- Activation functions: **Swish**, GELU, ReLU, Mish, SELU
-- Dropout rates: [0.05, 0.25]
-- Learning rates: [1e-5, 1e-2]
-- Batch sizes: [32, 64, 128]
+* SABR parameters are generated using **Sobol sequences** for uniform state-space coverage.
+* To capture the critical At-The-Money (ATM) singularity where curvature is highest, we implemented a **Gaussian Refinement Mesh** ($K \approx F$).
 
-**Best Configuration Found**:
-```json
-{
-  "model_type": "mlp",
-  "activation": "swish",
-  "hidden_dims": [512, 256, 128],
-  "batch_size": 128,
-  "lr": 0.000231,
-  "dropout": 0.127,
-  "optimizer": "adamw",
-  "value_weight": 0.884,
-  "derivative_weight": 0.653
-}
+### 2. JAX-Powered Sobolev Loss
+
+* Standard ML models often produce noisy derivatives, rendering them unusable for risk management (Delta/Vega hedging).
+* We implemented a custom **Sobolev Loss** using JAX auto-differentiation, forcing the neural network to minimize errors not only on the volatility values ($V$) but also on the exact SABR gradients.
+
+### 3. Neural Network Stacking (Ray Tune Optimized)
+
+* TabPFN acts as a high-level "Oracle" feature extractor.
+* A Multilayer Perceptron (MLP), hyperparameter-tuned via **Ray Tune**, takes both the raw SABR parameters and the TabPFN prediction to output the final, smoothed volatility and its derivatives.
+
+---
+
+## 📁 Repository Structure
+
+```
+TabPFN-Project/
+├── data/                       
+│   ├── sabr_hybrid_mesh_scaled.csv
+│   └── scaling_params_derivatives.json
+├── script/                     
+│   ├── true_step_jax_sabr.py
+│   ├── meshes.py
+│   ├── step08_transfer_learning.py
+│   └── comparision.py
+├── ray_results/                
+├── graph/                      
+└── tabpfn_step9_causal_final.pth
 ```
 
-**Result**: Best validation MAE = **0.03021** on pure MLP baseline.
+---
+
+## 📊 Results & Performance
+
+By comparing the baseline TabPFN with our final Sobolev-regularized Stacking MLP, we achieved significant improvements, particularly regarding the stability of the Greeks:
+
+* **Volatility Prediction:** High accuracy maintained across the surface
+* **Skew ($\partial V/\partial K$) Stability:** The Stacking architecture drastically reduced the "gradient noise" inherent to the baseline model, providing smooth and financially consistent derivatives crucial for hedging
+
+*(Tip: add a comparison plot here — ça fait très pro en entretien)*
 
 ---
 
-## Phase 4: Hybrid Stacking Architecture (Step 8)
+## ⚙️ Usage
 
-**Objective**: Combine TabPFN's robustness with optimized head's accuracy.
+### 1. Installation
 
-**Architecture**:
+Clone the repository and install dependencies:
+
+```bash
+git clone https://github.com/JoelKt29/TabPFN-Project.git
+cd TabPFN-Project
+pip install -r requirements.txt
 ```
-Input SABR Parameters (8 dims)
-        ↓
-   TabPFN Encoder (frozen, pretrained)
-        ↓
-   TabPFN Prediction (1 dim)
-        ↓
-   Custom Head (Swish, 512→256→128→7)
-        ↓
-   7 Outputs: [Volatility, dV/dAlpha, dV/dBeta, dV/dRho, dV/dVolVol, dV/dF, dV/dK]
-```
-
-**Key Design Decisions**:
--  Keep TabPFN frozen (preserve pretrained knowledge)
--  Fine-tune only the custom head (low computational cost)
--  Inject both raw features AND TabPFN predictions into head (dual inputs)
-
-**Training Strategy**:
-- Batch size: 64 (from Step 7 optimization)
-- Learning rate: 0.000231 (from Step 7)
-- Loss function: Sobolev (Step 6)
-- Epochs: 50 with early stopping
-- Data: 80% training, 20% validation
 
 ---
 
-## Phase 5: Causal Fine-Tuning with Synthetic Data (Step 9)
+### 2. Running the Comparison
 
-**Objective**: Train the model on causally-structured synthetic data to improve generalization.
+```bash
+python script/comparision.py
+```
 
-**SCM (Structural Causal Model) Data Generation**:
+---
 
-We generate realistic SABR scenarios via a causal mechanism:
+### 3. Training the Stacking Model
 
+```bash
+python script/step08_transfer_learning.py
+```
 
+---
+
+## 🛠️ Technology Stack
+
+* **Machine Learning:** PyTorch, TabPFN
+* **Scientific Computing & Gradients:** JAX, NumPy
+* **Hyperparameter Optimization:** Ray Tune
+* **Data Processing:** Pandas, SciPy (Sobol sequences)
+
+---
+
+## 🤝 Acknowledgements
+
+This project was developed as part of an applied quantitative finance research initiative, focusing on bridging the gap between state-of-the-art Deep Learning and rigorous mathematical finance.
+
+---
+
+## 👤 Author
+
+**Joël Khayat**
 
 ---
