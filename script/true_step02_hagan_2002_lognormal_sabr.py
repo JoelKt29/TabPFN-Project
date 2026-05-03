@@ -1,5 +1,5 @@
 import numpy as np
-from script.true_step01_base_sabr import BaseLognormalSABR
+from true_step01_base_sabr import BaseLognormalSABR
 from pysabr import black
 from scipy.optimize import minimize
 

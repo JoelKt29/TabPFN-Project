@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from script.true_step02_hagan_2002_lognormal_sabr import Hagan2002LognormalSABR
+from true_step02_hagan_2002_lognormal_sabr import Hagan2002LognormalSABR
 from sklearn.preprocessing import MinMaxScaler
 import json
 from tqdm import tqdm 
@@ -22,7 +22,7 @@ TARGET_SAMPLES = 5000
 # moneyness_factor is used to calculate K = F * factor
 PARAM_NAMES = ['beta', 'rho', 'volvol', 'v_atm_n', 'f', 'moneyness']
 L_BOUNDS = [0.25, -0.50, 0.15, 0.005, 0.01, 0.75] # Lower bounds
-U_BOUNDS = [0.99,  0.50, 0.45, 0.030, 0.06, 1.50] # Upper bounds
+U_BOUNDS = [0.99,  0.50, 0.45, 0.030, 0.05, 1.50] # Upper bounds
 
 def generate_sobol_data():
     print(f"Generating data via Sobol (Target: {TARGET_SAMPLES} points)...")
