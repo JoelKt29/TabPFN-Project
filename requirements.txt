@@ -1,0 +1,25 @@
+# Dépendances directes du projet (UTF-8, encodage corrigé)
+# Curé depuis les imports réels du code, pas un `pip freeze` complet.
+
+# --- Core scientifique ---
+numpy==2.3.4
+pandas==2.3.3
+scipy==1.16.2
+scikit-learn==1.6.1
+
+# --- Modèles / ML ---
+torch==2.9.0
+tabpfn==2.2.1
+jax            # absent du freeze d'origine -> à épingler après installation (ex: jax==0.4.x)
+ray[tune]      # idem -> épingler la version utilisée pour Ray Tune
+
+# --- Finance ---
+pysabr==0.4.1
+
+# --- Visualisation ---
+matplotlib==3.10.7
+seaborn==0.13.2
+plotly==6.5.0
+
+# --- Utilitaires ---
+tqdm==4.67.1
