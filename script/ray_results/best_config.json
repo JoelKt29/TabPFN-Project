@@ -1,0 +1,23 @@
+{
+  "data_path": "/Users/joelkhayat/Documents/GitHub/TabPFN-Project/Sans titre/data/sabr_hybrid_mesh_scaled.csv",
+  "model_type": "mlp",
+  "activation": "gelu",
+  "d_model": 256,
+  "nhead": 8,
+  "num_layers": 6,
+  "dim_feedforward": 2048,
+  "hidden_dims": [
+    512,
+    256,
+    128
+  ],
+  "batch_size": 128,
+  "lr": 0.009319107215763886,
+  "dropout": 0.0981066298770269,
+  "optimizer": "adam",
+  "weight_decay": 5.674004616868163e-05,
+  "num_epochs": 50,
+  "use_derivative_loss": true,
+  "value_weight": 0.6534252460086141,
+  "derivative_weight": 0.132149521056582
+}
