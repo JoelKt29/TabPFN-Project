@@ -110,5 +110,6 @@ This project was developed as part of an applied quantitative finance research i
 ## 👤 Author
 
 **Joël Khayat**
+**Benjamin Benisti**
 
 ---
